@@ -1,0 +1,5 @@
+sku,name,unit,isActive
+SKU-010,Shampoo 500ml,UN,true
+SKU-011,Condicionador 250ml,UN,1
+SKU-012,Sabonete 90g,UN,sim
+SKU-002,Produto B (novo nome),CX,true

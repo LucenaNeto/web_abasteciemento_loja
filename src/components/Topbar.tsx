@@ -35,6 +35,8 @@ export default function Topbar() {
     role === "admin" ? "Administrador" : role === "store" ? "Loja" : role === "warehouse" ? "Almoxarifado" : "";
 
   const isAdmin = role === "admin";
+  const canCreateReq = role === "admin" || role === "store";
+  const canHandleReq = role === "admin" || role === "warehouse";
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur">
@@ -46,16 +48,48 @@ export default function Topbar() {
           </Link>
           <nav className="hidden gap-1 sm:flex">
             <NavLink href="/" label="Início" active={pathname === "/"} />
+
+            {/* Produtos + Importar (Admin) */}
             <NavLink
               href="/produtos"
               label="Produtos"
-              active={pathname.startsWith("/produtos")}
+              active={pathname.startsWith("/produtos") && !pathname.startsWith("/produtos/import")}
             />
+            {isAdmin && (
+              <NavLink
+                href="/produtos/import"
+                label="Importar"
+                active={pathname.startsWith("/produtos/import")}
+              />
+            )}
+
+            {/* Requisições + Nova (Store/Admin) + Pendentes (Warehouse/Admin) */}
             <NavLink
               href="/requisicoes"
               label="Requisições"
-              active={pathname.startsWith("/requisicoes")}
+              active={
+                pathname === "/requisicoes" ||
+                (pathname.startsWith("/requisicoes/") &&
+                  !pathname.startsWith("/requisicoes/nova") &&
+                  !pathname.startsWith("/requisicoes/pendentes"))
+              }
             />
+            {canCreateReq && (
+              <NavLink
+                href="/requisicoes/nova"
+                label="Nova"
+                active={pathname.startsWith("/requisicoes/nova")}
+              />
+            )}
+            {canHandleReq && (
+              <NavLink
+                href="/requisicoes/pendentes"
+                label="Pendentes"
+                active={pathname.startsWith("/requisicoes/pendentes")}
+              />
+            )}
+
+            {/* Usuários/Auditoria (Admin) */}
             {isAdmin && (
               <NavLink
                 href="/usuarios"
@@ -96,13 +130,39 @@ export default function Topbar() {
           <NavLink
             href="/produtos"
             label="Produtos"
-            active={pathname.startsWith("/produtos")}
+            active={pathname.startsWith("/produtos") && !pathname.startsWith("/produtos/import")}
           />
+          {isAdmin && (
+            <NavLink
+              href="/produtos/import"
+              label="Importar"
+              active={pathname.startsWith("/produtos/import")}
+            />
+          )}
           <NavLink
             href="/requisicoes"
             label="Requisições"
-            active={pathname.startsWith("/requisicoes")}
+            active={
+              pathname === "/requisicoes" ||
+              (pathname.startsWith("/requisicoes/") &&
+                !pathname.startsWith("/requisicoes/nova") &&
+                !pathname.startsWith("/requisicoes/pendentes"))
+            }
           />
+          {canCreateReq && (
+            <NavLink
+              href="/requisicoes/nova"
+              label="Nova"
+              active={pathname.startsWith("/requisicoes/nova")}
+            />
+          )}
+          {canHandleReq && (
+            <NavLink
+              href="/requisicoes/pendentes"
+              label="Pendentes"
+              active={pathname.startsWith("/requisicoes/pendentes")}
+            />
+          )}
           {isAdmin && (
             <NavLink
               href="/usuarios"
