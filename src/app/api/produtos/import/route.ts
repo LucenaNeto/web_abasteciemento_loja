@@ -279,15 +279,14 @@ function parseCsv(text: string, delimiter: string) {
 function parseXlsx(buf: Buffer) {
   const wb = XLSX.read(buf, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  // defval mantém campos vazios como "" (não undefined)
-  const arr = XLSX.utils.sheet_to_json(ws, { defval: "" }) as any[];
-  // renomeia headers
+  // usa o texto exibido na planilha, preservando zeros à esquerda quando houver
+  const arr = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false }) as any[];
   return arr.map((row) => {
     const out: any = {};
-    Object.keys(row).forEach((key) => {
+    for (const key of Object.keys(row)) {
       const k = synonymMap[normalizeHeader(key)] ?? key;
       out[k] = row[key];
-    });
+    }
     return out;
   });
 }

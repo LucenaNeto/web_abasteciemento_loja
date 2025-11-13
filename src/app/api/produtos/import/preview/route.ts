@@ -207,7 +207,8 @@ function parseCsv(text: string, delimiter: string) {
 function parseXlsx(buf: Buffer) {
   const wb = XLSX.read(buf, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const arr = XLSX.utils.sheet_to_json(ws, { defval: "" }) as any[];
+  // usa o texto exibido na planilha, preservando zeros à esquerda quando houver
+  const arr = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false }) as any[];
   return arr.map((row) => {
     const out: any = {};
     for (const key of Object.keys(row)) {

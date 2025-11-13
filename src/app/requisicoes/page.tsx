@@ -20,8 +20,6 @@ type ListResp = {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
 
-type CreateItem = { productId: number | ""; requestedQty: number | "" };
-
 export default function RequisicoesPage() {
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as "admin" | "store" | "warehouse" | undefined;
@@ -41,13 +39,6 @@ export default function RequisicoesPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  // modal criar
-  const [openNew, setOpenNew] = useState(false);
-  const [note, setNote] = useState("");
-  const [items, setItems] = useState<CreateItem[]>([{ productId: "", requestedQty: "" }]);
-  const [saving, setSaving] = useState(false);
-  const [newErr, setNewErr] = useState<string | null>(null);
 
   const canCreate = role === "admin" || role === "store";
   const canOperate = role === "admin" || role === "warehouse";
@@ -86,7 +77,6 @@ export default function RequisicoesPage() {
 
   function resetAndReload() {
     setPage(1);
-    // o useEffect recarrega por causa do query
   }
 
   // ações rápidas
@@ -120,64 +110,6 @@ export default function RequisicoesPage() {
     await load();
   }
 
-  // criar
-  function addItem() {
-    setItems((prev) => [...prev, { productId: "", requestedQty: "" }]);
-  }
-  function rmItem(idx: number) {
-    setItems((prev) => prev.filter((_, i) => i !== idx));
-  }
-  function setItem(idx: number, key: keyof CreateItem, v: string) {
-    setItems((prev) =>
-      prev.map((it, i) =>
-        i === idx
-          ? {
-              ...it,
-              [key]:
-                key === "productId"
-                  ? (v === "" ? "" : Number.parseInt(v, 10))
-                  : (v === "" ? "" : Number.parseInt(v, 10)),
-            }
-          : it,
-      ),
-    );
-  }
-
-  async function createReq() {
-    setNewErr(null);
-    // valida mínimos
-    const payloadItems = items
-      .filter((i) => Number.isFinite(i.productId) && Number.isFinite(i.requestedQty))
-      .map((i) => ({ productId: Number(i.productId), requestedQty: Number(i.requestedQty) }));
-
-    if (payloadItems.length === 0) {
-      setNewErr("Inclua pelo menos 1 item com produto e quantidade.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const resp = await fetch("/api/requisicoes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ note: note.trim() || undefined, items: payloadItems }),
-      });
-      if (!resp.ok) {
-        const j = await safeJson(resp);
-        throw new Error(j?.error || `Falha ao criar (HTTP ${resp.status})`);
-      }
-      setOpenNew(false);
-      setNote("");
-      setItems([{ productId: "", requestedQty: "" }]);
-      resetAndReload();
-      await load();
-    } catch (e: any) {
-      setNewErr(String(e?.message ?? e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl">
@@ -191,13 +123,14 @@ export default function RequisicoesPage() {
               </Link>
             </p>
           </div>
+
           {canCreate && (
-            <button
-              onClick={() => setOpenNew(true)}
+            <Link
+              href="/requisicoes/nova"
               className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
             >
               Nova Requisição
-            </button>
+            </Link>
           )}
         </header>
 
@@ -359,111 +292,6 @@ export default function RequisicoesPage() {
           </div>
         </section>
       </div>
-
-      {/* Modal Nova Requisição (simples) */}
-      {canCreate && openNew && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Nova Requisição</h3>
-              <button onClick={() => setOpenNew(false)} className="text-gray-500 hover:text-gray-700">
-                ✕
-              </button>
-            </div>
-
-            {newErr && (
-              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {newErr}
-              </div>
-            )}
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700">Observação</label>
-              <input
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
-                placeholder="ex.: reposição loja 01"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </div>
-
-            <div className="mt-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-sm font-medium text-gray-700">Itens</h4>
-                <div className="text-xs text-gray-500">
-                  Dica: veja os IDs em <Link href="/produtos" className="underline">Produtos</Link>.
-                </div>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-left text-gray-600">
-                    <tr>
-                      <th className="px-3 py-2 w-40">Produto ID</th>
-                      <th className="px-3 py-2 w-40">Qtd solicitada</th>
-                      <th className="px-3 py-2 w-20"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((it, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="px-3 py-2">
-                          <input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            className="w-full rounded-lg border px-2 py-1.5"
-                            value={it.productId === "" ? "" : String(it.productId)}
-                            onChange={(e) => setItem(idx, "productId", e.target.value)}
-                            placeholder="ex.: 1"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            className="w-full rounded-lg border px-2 py-1.5"
-                            value={it.requestedQty === "" ? "" : String(it.requestedQty)}
-                            onChange={(e) => setItem(idx, "requestedQty", e.target.value)}
-                            placeholder="ex.: 5"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            onClick={() => rmItem(idx)}
-                            className="rounded-lg border px-2 py-1.5 text-xs hover:bg-gray-50"
-                            disabled={items.length === 1}
-                          >
-                            Remover
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="mt-3">
-                <button onClick={addItem} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50">
-                  + Adicionar item
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button onClick={() => setOpenNew(false)} className="rounded-xl border px-4 py-2" disabled={saving}>
-                Cancelar
-              </button>
-              <button
-                onClick={createReq}
-                disabled={saving}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
-              >
-                {saving ? "Salvando..." : "Salvar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
@@ -506,8 +334,14 @@ async function safeText(r: Response) {
 }
 
 async function safeJson(r: Response) {
+  // Robusto p/ respostas sem corpo ou não-JSON (ex.: 204)
+  if (r.status === 204 || r.status === 205 || r.status === 304) return null as any;
+  const ctype = (r.headers.get("content-type") || "").toLowerCase();
+  if (!ctype.includes("application/json")) return null as any;
+  const txt = await r.text();
+  if (!txt) return null as any;
   try {
-    return await r.json();
+    return JSON.parse(txt);
   } catch {
     return null as any;
   }
