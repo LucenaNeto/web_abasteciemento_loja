@@ -106,7 +106,7 @@ export default function AtenderRequisicaoPage() {
         })),
       };
 
-      // 1ª tentativa: rota dedicada /status ou /items
+      // 1ª tentativa: rota dedicada /items
       let resp = await fetch(`/api/requisicoes/${req.id}/items`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -122,7 +122,7 @@ export default function AtenderRequisicaoPage() {
         });
       }
 
-      const j = await safeJson(resp);
+      const j = await maybeJson(resp); // trata 204/sem JSON
       if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
 
       await load();
@@ -164,7 +164,7 @@ export default function AtenderRequisicaoPage() {
         });
       }
 
-      const j = await safeJson(resp);
+      const j = await maybeJson(resp); // trata 204/sem JSON
       if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
 
       alert("Requisição concluída!");
@@ -354,9 +354,19 @@ function formatDate(iso: string) {
   }
 }
 async function safeJson(r: Response) {
+  // Robusto para respostas que não são JSON
+  if (r.status === 204 || r.status === 205 || r.status === 304) return null;
+  const ctype = (r.headers.get("content-type") || "").toLowerCase();
+  if (!ctype.includes("application/json")) return null;
+  const text = await r.text();
+  if (!text) return null;
   try {
-    return await r.json();
+    return JSON.parse(text);
   } catch {
     return null;
   }
+}
+async function maybeJson(r: Response) {
+  // Alias semântico para operações PATCH/DELETE que podem devolver 204
+  return safeJson(r);
 }

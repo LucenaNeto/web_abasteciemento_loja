@@ -1,9 +1,10 @@
+// src/app/requisicoes/pendentes/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter } from "next/navigation"; // App Router ✅
 
 type Role = "admin" | "store" | "warehouse";
 
@@ -24,6 +25,7 @@ export default function PendentesAlmoxPage() {
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as Role | undefined;
   const canHandle = role === "warehouse" || role === "admin";
+  const router = useRouter();
 
   // filtros
   const [q, setQ] = useState("");
@@ -36,7 +38,9 @@ export default function PendentesAlmoxPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const router = useRouter();
+
+  // loading por linha ao atender
+  const [attendingId, setAttendingId] = useState<number | null>(null);
 
   const query = useMemo(() => {
     const usp = new URLSearchParams();
@@ -70,32 +74,36 @@ export default function PendentesAlmoxPage() {
   }, [status, canHandle, query]);
 
   async function atender(id: number) {
-  if (!canHandle) return;
-  try {
-    const resp = await fetch(`/api/requisicoes/${id}/status`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "in_progress" }),
-    });
-
-    if (resp.status === 404) {
-      const alt = await fetch(`/api/requisicoes/${id}`, {
+    if (!canHandle) return;
+    setAttendingId(id);
+    try {
+      // endpoint preferencial
+      let resp = await fetch(`/api/requisicoes/${id}/status`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "in_progress" }),
       });
-      if (!alt.ok) throw new Error(await safeText(alt));
-    } else if (!resp.ok) {
-      throw new Error(await safeText(resp));
+
+      // fallback se não existir rota dedicada
+      if (resp.status === 404) {
+        resp = await fetch(`/api/requisicoes/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: "in_progress" }),
+        });
+      }
+
+      // trata 204/sem corpo JSON
+      const j = await maybeJson(resp);
+      if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
+
+      router.push(`/requisicoes/${id}/atender`);
+    } catch (e: any) {
+      alert(`Falha ao marcar como "em progresso": ${String(e?.message ?? e)}`);
+    } finally {
+      setAttendingId(null);
     }
-
-    // redireciona direto para a tela de atendimento
-    router.push(`/requisicoes/${id}/atender`);
-  } catch (e: any) {
-    alert(`Falha ao marcar como "em progresso": ${String(e?.message ?? e)}`);
   }
-}
-
 
   if (status === "loading") return <div className="p-6">Carregando...</div>;
   if (!canHandle) {
@@ -171,10 +179,11 @@ export default function PendentesAlmoxPage() {
                       <td className="px-4 py-3 flex gap-2">
                         <button
                           onClick={() => atender(r.id)}
-                          className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                          disabled={attendingId === r.id}
+                          className="rounded-lg border px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
                           title='Mudar status para "em progresso"'
                         >
-                          Atender
+                          {attendingId === r.id ? "Atendendo..." : "Atender"}
                         </button>
                         <Link
                           href={`/requisicoes/${r.id}`}
@@ -231,4 +240,20 @@ async function safeText(r: Response) {
   } catch {
     return "";
   }
+}
+async function safeJson(r: Response) {
+  if (r.status === 204 || r.status === 205 || r.status === 304) return null;
+  const ctype = (r.headers.get("content-type") || "").toLowerCase();
+  if (!ctype.includes("application/json")) return null;
+  const text = await r.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+async function maybeJson(r: Response) {
+  // Alias para operações que podem retornar 204 (sem corpo)
+  return safeJson(r);
 }

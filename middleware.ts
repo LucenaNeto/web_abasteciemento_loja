@@ -1,57 +1,72 @@
-// middleware.ts
+// middleware.ts (ou src/middleware.ts)
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+// Ajuste se necessário, mas o padrão abaixo cobre páginas (exclui _next, api, etc.)
+export const config = {
+  matcher: ["/((?!_next|api|favicon.ico|assets|public).*)"],
+};
+
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Rotas públicas (sem necessidade de login)
-  const publicPaths = [
-    "/login",
-    "/api/auth", // endpoints do NextAuth
-    "/favicon.ico",
-  ];
+  // Permite livre: 403 e arquivos estáticos
+  if (pathname === "/403") return NextResponse.next();
 
-  // Recursos estáticos
-  if (
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/static/") ||
-    pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|css|js|map)$/)
-  ) {
-    return NextResponse.next();
-  }
-
-  // Permite públicos (login e auth)
-  if (publicPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
-    return NextResponse.next();
-  }
-
-  // Obtém token da sessão (funciona no middleware)
+  // Lê o token da sessão (requer NEXTAUTH_SECRET no .env)
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  const isLogged = !!token;
 
-  // Não autenticado
-  if (!token) {
-    // Se for API (exceto /api/auth), responde 401 em vez de redirecionar
-    if (pathname.startsWith("/api")) {
-      return new NextResponse(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      });
-    }
-
-    // Redireciona para /login com callbackUrl
-    const loginUrl = new URL("/login", req.url);
-    const callbackUrl = pathname + (search ?? "");
-    loginUrl.searchParams.set("callbackUrl", callbackUrl);
-    return NextResponse.redirect(loginUrl);
+  // Usuário já autenticado acessando /login => manda pra home
+  if (pathname.startsWith("/login")) {
+    if (isLogged) return NextResponse.redirect(new URL("/", req.url));
+    return NextResponse.next();
   }
 
-  // Autenticado → segue o fluxo
+  // Bloqueia qualquer página sem login
+  if (!isLogged) {
+    const url = new URL("/login", req.url);
+    // opcional: preserva destino
+    url.searchParams.set("redirectTo", pathname + search);
+    return NextResponse.redirect(url);
+  }
+
+  // Extrai role do token (ajuste conforme seu callback do NextAuth)
+  const role =
+    (token as any)?.role ||
+    (token as any)?.user?.role ||
+    "";
+
+  // ---------- Regras de acesso por rota ----------
+
+  // Admin-only
+  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria"];
+  if (adminOnly.some((p) => pathname.startsWith(p))) {
+    if (role !== "admin") return deny(req);
+  }
+
+  // Store/Admin podem criar
+  if (pathname.startsWith("/requisicoes/nova")) {
+    if (role !== "admin" && role !== "store") return deny(req);
+  }
+
+  // Warehouse/Admin: fila de pendentes e tela de atender
+  const isPendentes = pathname.startsWith("/requisicoes/pendentes");
+  const isAtender = pathname.endsWith("/atender") && pathname.startsWith("/requisicoes/");
+  if (isPendentes || isAtender) {
+    if (role !== "admin" && role !== "warehouse") return deny(req);
+  }
+
+  // Demais páginas: apenas autenticado
   return NextResponse.next();
 }
 
-// Aplica o middleware a tudo, exceto recursos estáticos (filtrados acima)
-export const config = {
-  matcher: ["/:path*"],
-};
+function deny(req: NextRequest) {
+  // Reescreve para /403 (UI bonita). Para API deixe a verificação nos handlers.
+  const url = new URL("/403", req.url);
+  // Dica: marcar cabeçalho ajuda a debugar em proxies
+  const res = NextResponse.rewrite(url);
+  res.headers.set("x-deny-reason", "rbac");
+  return res;
+}

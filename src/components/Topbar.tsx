@@ -29,6 +29,9 @@ function NavLink({
 export default function Topbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  if (pathname?.startsWith("/login")) {
+    return null;
+  }
   const user = session?.user as any;
   const role = (user?.role ?? "") as "admin" | "store" | "warehouse" | "";
   const roleLabel =
