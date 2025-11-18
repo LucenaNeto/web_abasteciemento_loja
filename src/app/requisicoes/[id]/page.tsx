@@ -36,10 +36,17 @@ type ReqDetail = Req & {
 
 export default function ReqDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = useMemo(() => Number.parseInt(String(params?.id ?? "").trim(), 10), [params]);
+  const id = useMemo(
+    () => Number.parseInt(String(params?.id ?? "").trim(), 10),
+    [params]
+  );
   const router = useRouter();
   const { data: session } = useSession();
-  const role = (session?.user as any)?.role as "admin" | "store" | "warehouse" | undefined;
+  const role = (session?.user as any)?.role as
+    | "admin"
+    | "store"
+    | "warehouse"
+    | undefined;
 
   const canOperate = role === "admin" || role === "warehouse";
 
@@ -80,7 +87,8 @@ export default function ReqDetailPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "in_progress", assignToMe: true }),
     });
-    if (!r.ok) return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
+    if (!r.ok)
+      return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
     await load();
   }
 
@@ -91,7 +99,8 @@ export default function ReqDetailPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "completed" }),
     });
-    if (!r.ok) return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
+    if (!r.ok)
+      return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
     await load();
   }
 
@@ -138,9 +147,13 @@ export default function ReqDetailPage() {
         {loading ? (
           <div className="rounded-2xl border bg-white p-6">Carregando...</div>
         ) : err ? (
-          <div className="rounded-2xl border bg-white p-6 text-red-600">{err}</div>
+          <div className="rounded-2xl border bg-white p-6 text-red-600">
+            {err}
+          </div>
         ) : !data ? (
-          <div className="rounded-2xl border bg-white p-6">Não encontrado.</div>
+          <div className="rounded-2xl border bg-white p-6">
+            Não encontrado.
+          </div>
         ) : (
           <>
             <header className="flex items-center justify-between">
@@ -151,11 +164,15 @@ export default function ReqDetailPage() {
                 <p className="text-sm text-gray-600">
                   Status: <Badge status={data.status} />{" "}
                   {data.assignedTo?.name ? (
-                    <span className="ml-2">• Responsável: {data.assignedTo.name}</span>
+                    <span className="ml-2">
+                      • Responsável: {data.assignedTo.name}
+                    </span>
                   ) : null}
                 </p>
                 {data.note ? (
-                  <p className="mt-1 text-sm text-gray-500">Obs.: {data.note}</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Obs.: {data.note}
+                  </p>
                 ) : null}
               </div>
               <div className="flex gap-2">
@@ -195,21 +212,33 @@ export default function ReqDetailPage() {
                   <tbody>
                     {data.items.length === 0 ? (
                       <tr>
-                        <td className="px-4 py-6 text-center text-gray-500" colSpan={6}>
+                        <td
+                          className="px-4 py-6 text-center text-gray-500"
+                          colSpan={6}
+                        >
                           Sem itens.
                         </td>
                       </tr>
                     ) : (
                       data.items.map((it, idx) => {
-                        const editable = canOperate && data.status !== "completed" && data.status !== "cancelled";
-                        const current = editQty[it.id] ?? String(it.deliveredQty);
+                        const editable =
+                          canOperate &&
+                          data.status !== "completed" &&
+                          data.status !== "cancelled";
+                        const current =
+                          editQty[it.id] ?? String(it.deliveredQty);
                         return (
                           <tr key={it.id} className="border-t border-gray-100">
                             <td className="px-4 py-3">#{idx + 1}</td>
                             <td className="px-4 py-3">
-                              <div className="font-medium">{it.productName ?? "-"}</div>
+                              <div className="font-medium">
+                                {it.productName ?? "-"}
+                              </div>
                               <div className="text-xs text-gray-500">
-                                {it.productSku ?? ""} {it.productUnit ? `• ${it.productUnit}` : ""}
+                                {it.productSku ?? ""}{" "}
+                                {it.productUnit
+                                  ? `• ${it.productUnit}`
+                                  : ""}
                               </div>
                             </td>
                             <td className="px-4 py-3">{it.requestedQty}</td>
@@ -221,7 +250,10 @@ export default function ReqDetailPage() {
                                   className="w-24 rounded-lg border px-2 py-1.5"
                                   value={current}
                                   onChange={(e) =>
-                                    setEditQty((m) => ({ ...m, [it.id]: e.target.value }))
+                                    setEditQty((m) => ({
+                                      ...m,
+                                      [it.id]: e.target.value,
+                                    }))
                                   }
                                 />
                               ) : (
@@ -238,10 +270,14 @@ export default function ReqDetailPage() {
                                   disabled={savingRow === it.id}
                                   className="rounded-lg border px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
                                 >
-                                  {savingRow === it.id ? "Salvando..." : "Salvar"}
+                                  {savingRow === it.id
+                                    ? "Salvando..."
+                                    : "Salvar"}
                                 </button>
                               ) : (
-                                <span className="text-xs text-gray-400">—</span>
+                                <span className="text-xs text-gray-400">
+                                  —
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -253,9 +289,11 @@ export default function ReqDetailPage() {
               </div>
             </section>
 
-            <footer className="mt-6 text-sm text-gray-500">
-              Criada em {formatDate(data.createdAt)} • Atualizada em {formatDate(data.updatedAt)}
-            </footer>
+            <p className="mt-6 text-xs text-gray-500">
+              Criada em {formatDateTimePt(data.createdAt)}
+              {" • "}
+              Atualizada em {formatDateTimePt(data.updatedAt)}
+            </p>
           </>
         )}
       </div>
@@ -271,7 +309,9 @@ function Badge({ status }: { status: ReqStatus }) {
     cancelled: "bg-red-100 text-red-800",
   };
   return (
-    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status]}`}>
+    <span
+      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status]}`}
+    >
       {status === "pending"
         ? "Pendente"
         : status === "in_progress"
@@ -291,7 +331,9 @@ function SmallBadge({ status }: { status: ItemStatus }) {
     cancelled: "bg-red-100 text-red-800",
   };
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${map[status]}`}>
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${map[status]}`}
+    >
       {status === "pending"
         ? "Pendente"
         : status === "partial"
@@ -303,13 +345,46 @@ function SmallBadge({ status }: { status: ItemStatus }) {
   );
 }
 
-function formatDate(iso: string) {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString();
-  } catch {
-    return iso;
+function parseDbDateTime(value: string | null | undefined) {
+  if (!value) return null;
+
+  let s = value.trim();
+
+  // Já vem em ISO com Z (ex.: 2025-11-18T14:10:30.000Z)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(s)) {
+    return new Date(s);
   }
+
+  // Formato SQLite CURRENT_TIMESTAMP: "YYYY-MM-DD HH:mm:ss" (UTC)
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    // converte para ISO UTC explícito
+    s = s.replace(" ", "T") + "Z";
+    return new Date(s);
+  }
+
+  // Qualquer outro formato: tenta parse normal
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function formatDateTimePt(value: string | null | undefined) {
+  const d = parseDbDateTime(value);
+  if (!d) return "-";
+
+  const dateStr = d.toLocaleDateString("pt-BR", {
+    timeZone: "America/Recife", // fuso -03:00
+  });
+
+  const timeStr = d.toLocaleTimeString("pt-BR", {
+    timeZone: "America/Recife",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  return `${dateStr}, ${timeStr}`;
 }
 
 async function safeText(r: Response) {

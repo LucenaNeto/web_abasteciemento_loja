@@ -173,7 +173,9 @@ export default function PendentesAlmoxPage() {
                   rows.map((r) => (
                     <tr key={r.id} className="border-t">
                       <td className="px-4 py-3">#{r.id}</td>
-                      <td className="px-4 py-3">{formatDate(r.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        {formatDateTimePt(r.createdAt)}
+                      </td>
                       <td className="px-4 py-3">{r.createdByName ?? "-"}</td>
                       <td className="px-4 py-3">{r.itemsCount ?? "-"}</td>
                       <td className="px-4 py-3 flex gap-2">
@@ -226,14 +228,51 @@ export default function PendentesAlmoxPage() {
   );
 }
 
-function formatDate(iso: string) {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString();
-  } catch {
-    return iso;
+/* -------- Helpers de data/hora (alinhados com tela de detalhes) -------- */
+
+function parseDbDateTime(value: string | null | undefined) {
+  if (!value) return null;
+
+  let s = value.trim();
+
+  // ISO com Z: 2025-11-18T14:10:30.000Z
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(s)) {
+    return new Date(s);
   }
+
+  // Formato SQLite CURRENT_TIMESTAMP: "YYYY-MM-DD HH:mm:ss" (UTC)
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    s = s.replace(" ", "T") + "Z"; // força UTC explícito
+    return new Date(s);
+  }
+
+  // Qualquer outro formato: tenta parse normal
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
 }
+
+function formatDateTimePt(value: string | null | undefined) {
+  const d = parseDbDateTime(value);
+  if (!d) return "-";
+
+  const dateStr = d.toLocaleDateString("pt-BR", {
+    timeZone: "America/Recife",
+  });
+
+  const timeStr = d.toLocaleTimeString("pt-BR", {
+    timeZone: "America/Recife",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  return `${dateStr}, ${timeStr}`;
+}
+
+/* -------- Helpers de fetch -------- */
+
 async function safeText(r: Response) {
   try {
     return await r.text();

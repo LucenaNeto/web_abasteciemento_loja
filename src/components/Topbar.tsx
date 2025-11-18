@@ -107,6 +107,13 @@ export default function Topbar() {
                 active={pathname.startsWith("/auditoria")}
               />
             )}
+            {isAdmin && (
+              <NavLink
+                href="/relatorios"
+                label="Relatórios"
+                active={pathname.startsWith("/relatorios")}
+              />
+            )}
           </nav>
         </div>
 
@@ -178,6 +185,13 @@ export default function Topbar() {
               href="/auditoria"
               label="Auditoria"
               active={pathname.startsWith("/auditoria")}
+            />
+          )}
+          {isAdmin && (
+            <NavLink
+              href="/relatorios/requisicoes/requisicoes"
+              label="Relatórios"
+              active={pathname.startsWith("/relatorios")}
             />
           )}
         </nav>
