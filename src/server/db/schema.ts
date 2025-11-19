@@ -1,12 +1,14 @@
-// src/server/db/schema.ts
 import { sql } from "drizzle-orm";
 import {
-  sqliteTable,
+  pgTable,
+  serial,
   integer,
   text,
+  boolean,
+  timestamp,
   index,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 /* =========================
@@ -15,29 +17,40 @@ import { relations } from "drizzle-orm";
 export const userRoles = ["admin", "store", "warehouse"] as const;
 export type UserRole = (typeof userRoles)[number];
 
-export const requestStatus = ["pending", "in_progress", "completed", "cancelled"] as const;
+export const requestStatus = [
+  "pending",
+  "in_progress",
+  "completed",
+  "cancelled",
+] as const;
 export type RequestStatus = (typeof requestStatus)[number];
 
-export const itemStatus = ["pending", "partial", "delivered", "cancelled"] as const;
+export const itemStatus = [
+  "pending",
+  "partial",
+  "delivered",
+  "cancelled",
+] as const;
 export type ItemStatus = (typeof itemStatus)[number];
-
-export const requestCriticality = ["cashier", "service", "restock"] as const;
-export type RequestCriticality = (typeof requestCriticality)[number];
 
 /* =========================
  * Users
  * =======================*/
-export const users = sqliteTable(
+export const users = pgTable(
   "users",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     name: text("name").notNull(),
     email: text("email").notNull().unique(),
     passwordHash: text("password_hash").notNull(),
     role: text("role", { enum: userRoles }).notNull().$type<UserRole>(),
-    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     emailIdx: index("idx_users_email").on(table.email),
@@ -48,47 +61,55 @@ export const users = sqliteTable(
 /* =========================
  * Products
  * =======================*/
-export const products = sqliteTable(
-  "products",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    sku: text("sku").notNull().unique(),
-    name: text("name").notNull(),
-    unit: text("unit").notNull().default("UN"),
-    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-    // saldo atual (para leitura rápida)
-    stock: integer("stock").notNull().default(0),
+export const products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  sku: text("sku").notNull().unique(),
+  name: text("name").notNull(),
+  unit: text("unit").notNull().default("UN"),
+  isActive: boolean("is_active").notNull().default(true),
+  // saldo atual (para leitura rápida)
+  stock: integer("stock").notNull().default(0),
 
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  },
-);
+  createdAt: timestamp("created_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: false })
+    .notNull()
+    .defaultNow(),
+});
 
 /* =========================
  * Inventory Movements (livro-razão)
  * =======================*/
-export const inventoryMovements = sqliteTable(
+export const inventoryMovements = pgTable(
   "inventory_movements",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    productId: integer("product_id").notNull().references(() => products.id),
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id),
     qty: integer("qty").notNull(), // sempre POSITIVO
     type: text("type", { enum: ["in", "out", "adjust"] }).notNull(), // entrada, saída, ajuste
 
     // referência cruzada (para idempotência e auditoria)
     refType: text("ref_type"), // ex.: "request"
-    refId: integer("ref_id"),  // ex.: id da requisição
+    refId: integer("ref_id"), // ex.: id da requisição
     requestItemId: integer("request_item_id"), // ex.: id do item usado na saída
 
     note: text("note"),
     createdByUserId: integer("created_by_user_id"), // opcional
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: timestamp("created_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     imProductIdx: index("idx_im_product").on(table.productId),
     // impede duplicar o movimento para o MESMO item de requisição
-    imReqItemUnique: uniqueIndex("uq_im_req_item").on(table.refType, table.requestItemId),
-    // (opcional) índice por data — útil para relatórios:
+    imReqItemUnique: uniqueIndex("uq_im_req_item").on(
+      table.refType,
+      table.requestItemId,
+    ),
+    // índice por data — útil para relatórios
     // imCreatedAtIdx: index("idx_im_created_at").on(table.createdAt),
   }),
 );
@@ -96,30 +117,36 @@ export const inventoryMovements = sqliteTable(
 /* =========================
  * Requests (Requisições)
  * =======================*/
-export const requests = sqliteTable(
+export const requests = pgTable(
   "requests",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
 
     createdByUserId: integer("created_by_user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "restrict", onUpdate: "cascade" }),
+      .references(() => users.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
 
-    assignedToUserId: integer("assigned_to_user_id")
-      .references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
+    assignedToUserId: integer("assigned_to_user_id").references(
+      () => users.id,
+      { onDelete: "set null", onUpdate: "cascade" },
+    ),
 
-    status: text("status", { enum: requestStatus }).notNull().default("pending").$type<RequestStatus>(),
-
-    // 🔴🟡🟢 Criticidade da requisição
-    criticality: text("criticality", { enum: requestCriticality })
+    status: text("status", { enum: requestStatus })
       .notNull()
-      .default("restock")
-      .$type<RequestCriticality>(),
+      .default("pending")
+      .$type<RequestStatus>(),
 
     note: text("note"),
 
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: timestamp("created_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     statusIdx: index("idx_requests_status").on(table.status),
@@ -132,26 +159,39 @@ export const requests = sqliteTable(
 /* =========================
  * Request Items
  * =======================*/
-export const requestItems = sqliteTable(
+export const requestItems = pgTable(
   "request_items",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
 
     requestId: integer("request_id")
       .notNull()
-      .references(() => requests.id, { onDelete: "cascade", onUpdate: "cascade" }),
+      .references(() => requests.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
 
     productId: integer("product_id")
       .notNull()
-      .references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
+      .references(() => products.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
 
     requestedQty: integer("requested_qty").notNull(),
     deliveredQty: integer("delivered_qty").notNull().default(0),
 
-    status: text("status", { enum: itemStatus }).notNull().default("pending").$type<ItemStatus>(),
+    status: text("status", { enum: itemStatus })
+      .notNull()
+      .default("pending")
+      .$type<ItemStatus>(),
 
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: timestamp("created_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     reqIdx: index("idx_request_items_request").on(table.requestId),
@@ -162,10 +202,10 @@ export const requestItems = sqliteTable(
 /* =========================
  * Audit Logs
  * =======================*/
-export const auditLogs = sqliteTable(
+export const auditLogs = pgTable(
   "audit_logs",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     tableName: text("table_name").notNull(), // ex.: "requests", "request_items", "products", "users"
     action: text("action").notNull(), // "CREATE", "UPDATE", "DELETE", "STATUS_CHANGE", etc.
     recordId: text("record_id").notNull(), // string p/ flexibilizar
@@ -175,7 +215,9 @@ export const auditLogs = sqliteTable(
     }),
     payload: text("payload"), // JSON serializado (string)
 
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: timestamp("created_at", { withTimezone: false })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     tableIdx: index("idx_audit_logs_table").on(table.tableName),
@@ -231,9 +273,12 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   }),
 }));
 
-export const inventoryMovementsRelations = relations(inventoryMovements, ({ one }) => ({
-  product: one(products, {
-    fields: [inventoryMovements.productId],
-    references: [products.id],
+export const inventoryMovementsRelations = relations(
+  inventoryMovements,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [inventoryMovements.productId],
+      references: [products.id],
+    }),
   }),
-}));
+);
