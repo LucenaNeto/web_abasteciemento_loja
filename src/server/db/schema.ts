@@ -33,6 +33,10 @@ export const itemStatus = [
 ] as const;
 export type ItemStatus = (typeof itemStatus)[number];
 
+export const criticalityLevels = ["cashier", "service", "restock"] as const;
+export type CriticalityLevel = (typeof criticalityLevels)[number];
+
+
 /* =========================
  * Users
  * =======================*/
@@ -139,6 +143,12 @@ export const requests = pgTable(
       .default("pending")
       .$type<RequestStatus>(),
 
+    // 🔴🟡🟢 criticidade
+    criticality: text("criticality", { enum: criticalityLevels })
+      .notNull()
+      .default("restock")
+      .$type<CriticalityLevel>(),
+
     note: text("note"),
 
     createdAt: timestamp("created_at", { withTimezone: false })
@@ -153,8 +163,11 @@ export const requests = pgTable(
     createdByIdx: index("idx_requests_created_by").on(table.createdByUserId),
     assignedIdx: index("idx_requests_assigned_to").on(table.assignedToUserId),
     createdAtIdx: index("idx_requests_created_at").on(table.createdAt),
+    // opcional, se quiser index por criticidade:
+    // criticalityIdx: index("idx_requests_criticality").on(table.criticality),
   }),
 );
+
 
 /* =========================
  * Request Items

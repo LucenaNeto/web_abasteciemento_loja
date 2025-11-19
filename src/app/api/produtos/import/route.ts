@@ -188,7 +188,7 @@ if (!filePart) {
       try {
         await tx
           .update(schema.products)
-          .set({ ...patch, updatedAt: new Date().toISOString() })
+          .set({ ...patch, updatedAt: new Date() })
           .where(eq(schema.products.id, current.id));
 
         await tx.insert(schema.auditLogs).values({

@@ -126,7 +126,7 @@ export async function PATCH(
         .set({
           deliveredQty,
           status: newStatus,
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date(),
         })
         .where(eq(schema.requestItems.id, id));
 
@@ -171,7 +171,7 @@ export async function PATCH(
       if (curStatus !== computed && curStatus !== "cancelled") {
         await tx
           .update(schema.requests)
-          .set({ status: computed, updatedAt: new Date().toISOString() })
+          .set({ status: computed, updatedAt: new Date() })
           .where(eq(schema.requests.id, currentItem.requestId));
 
         await tx.insert(schema.auditLogs).values({

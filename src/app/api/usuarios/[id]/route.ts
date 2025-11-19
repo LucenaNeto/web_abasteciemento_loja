@@ -107,7 +107,7 @@ export async function PATCH(
   // Atualiza
   await db
     .update(schema.users)
-    .set({ ...patch, updatedAt: new Date().toISOString() })
+    .set({ ...patch, updatedAt: new Date()})
     .where(eq(schema.users.id, id));
 
   // Auditoria (UPDATE)

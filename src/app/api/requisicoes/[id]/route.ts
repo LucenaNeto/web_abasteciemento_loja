@@ -232,7 +232,7 @@ export async function PATCH(
           .set({
             deliveredQty: p.deliveredFinal,
             status: newItemStatus as any,
-            updatedAt: new Date().toISOString(),
+            updatedAt: new Date(),
           })
           .where(eq(schema.requestItems.id, p.itemId));
 
@@ -257,7 +257,7 @@ export async function PATCH(
             .update(schema.products)
             .set({
               stock: sql`${schema.products.stock} - ${p.moveDelta}`,
-              updatedAt: new Date().toISOString(),
+              updatedAt: new Date(),
             })
             .where(eq(schema.products.id, p.productId));
         }
@@ -279,7 +279,7 @@ export async function PATCH(
       // 8) Atualiza requisição (status/nota/assignee)
       const patchReq: Partial<typeof schema.requests.$inferInsert> = {
         status: nextStatus,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       };
       if (payload.assignToMe && userId) patchReq.assignedToUserId = userId;
       if (payload.note !== undefined) patchReq.note = payload.note;
