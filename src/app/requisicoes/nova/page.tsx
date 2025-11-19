@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type Role = "admin" | "store" | "warehouse";
+type Criticality = "cashier" | "service" | "restock";
 
 type ProductRow = {
   id: number;
@@ -18,7 +19,12 @@ type ProductRow = {
 
 type ListResp = {
   data: ProductRow[];
-  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 type CartItem = {
@@ -46,10 +52,17 @@ export default function NovaRequisicaoPage() {
   // carrinho
   const [cart, setCart] = useState<Record<number, CartItem>>({});
   const cartArr = useMemo(() => Object.values(cart), [cart]);
-  const totalItens = useMemo(() => cartArr.reduce((s, it) => s + (it.qty || 0), 0), [cartArr]);
+  const totalItens = useMemo(
+    () => cartArr.reduce((s, it) => s + (it.qty || 0), 0),
+    [cartArr],
+  );
 
   // obs
   const [note, setNote] = useState("");
+
+  // criticidade (restock = Abastecimento por padrão)
+  const [criticality, setCriticality] =
+    useState<Criticality>("restock");
 
   // envio
   const [saving, setSaving] = useState(false);
@@ -64,7 +77,9 @@ export default function NovaRequisicaoPage() {
       usp.set("page", String(page));
       usp.set("pageSize", "10");
 
-      const r = await fetch(`/api/produtos?${usp.toString()}`, { cache: "no-store" });
+      const r = await fetch(`/api/produtos?${usp.toString()}`, {
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error(await safeText(r));
       const j: ListResp = await r.json();
       setRows(j.data);
@@ -139,7 +154,11 @@ export default function NovaRequisicaoPage() {
       const r = await fetch("/api/requisicoes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items, note: note.trim() || undefined }),
+        body: JSON.stringify({
+          items,
+          note: note.trim() || undefined,
+          criticality, // 🔴🟡🟢 enviado para a API
+        }),
       });
       const j = await safeJson(r);
       if (!r.ok) throw new Error(j?.error || `Falha (HTTP ${r.status})`);
@@ -163,7 +182,8 @@ export default function NovaRequisicaoPage() {
       <main className="min-h-screen bg-gray-50 p-6">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-2xl border bg-white p-6 text-red-600">
-            Sem permissão. Apenas <strong>Loja</strong> ou <strong>Admin</strong> podem criar requisições.
+            Sem permissão. Apenas <strong>Loja</strong> ou{" "}
+            <strong>Admin</strong> podem criar requisições.
           </div>
         </div>
       </main>
@@ -173,15 +193,19 @@ export default function NovaRequisicaoPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-4 text-sm flex items-center justify-between">
-          <Link href="/requisicoes" className="underline">← Voltar</Link>
+        <div className="mb-4 flex items-center justify-between text-sm">
+          <Link href="/requisicoes" className="underline">
+            ← Voltar
+          </Link>
           <span className="text-xs text-gray-500">Nova Requisição</span>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* BUSCA DE PRODUTO */}
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
-            <h2 className="text-lg font-semibold text-gray-900">Buscar produtos</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Buscar produtos
+            </h2>
             <div className="mt-3 flex gap-2">
               <input
                 className="w-full rounded-xl border px-3 py-2"
@@ -210,11 +234,29 @@ export default function NovaRequisicaoPage() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td className="px-3 py-4 text-center" colSpan={4}>Carregando...</td></tr>
+                    <tr>
+                      <td className="px-3 py-4 text-center" colSpan={4}>
+                        Carregando...
+                      </td>
+                    </tr>
                   ) : err ? (
-                    <tr><td className="px-3 py-4 text-center text-red-600" colSpan={4}>{err}</td></tr>
+                    <tr>
+                      <td
+                        className="px-3 py-4 text-center text-red-600"
+                        colSpan={4}
+                      >
+                        {err}
+                      </td>
+                    </tr>
                   ) : rows.length === 0 ? (
-                    <tr><td className="px-3 py-4 text-center text-gray-500" colSpan={4}>Nenhum produto.</td></tr>
+                    <tr>
+                      <td
+                        className="px-3 py-4 text-center text-gray-500"
+                        colSpan={4}
+                      >
+                        Nenhum produto.
+                      </td>
+                    </tr>
                   ) : (
                     rows.map((p) => (
                       <tr key={p.id} className="border-t">
@@ -238,7 +280,9 @@ export default function NovaRequisicaoPage() {
 
             {/* paginação */}
             <div className="mt-3 flex items-center justify-between text-sm text-gray-600">
-              <span>Página {page} de {totalPages}</span>
+              <span>
+                Página {page} de {totalPages}
+              </span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -260,7 +304,9 @@ export default function NovaRequisicaoPage() {
 
           {/* CARRINHO */}
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
-            <h2 className="text-lg font-semibold text-gray-900">Carrinho ({totalItens} itens)</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Carrinho ({totalItens} itens)
+            </h2>
 
             <div className="mt-3 overflow-x-auto rounded-xl border">
               <table className="min-w-full text-sm">
@@ -274,7 +320,14 @@ export default function NovaRequisicaoPage() {
                 </thead>
                 <tbody>
                   {cartArr.length === 0 ? (
-                    <tr><td className="px-3 py-4 text-center text-gray-500" colSpan={4}>Carrinho vazio.</td></tr>
+                    <tr>
+                      <td
+                        className="px-3 py-4 text-center text-gray-500"
+                        colSpan={4}
+                      >
+                        Carrinho vazio.
+                      </td>
+                    </tr>
                   ) : (
                     cartArr.map((it) => (
                       <tr key={it.productId} className="border-t">
@@ -286,7 +339,9 @@ export default function NovaRequisicaoPage() {
                             inputMode="numeric"
                             pattern="[0-9]*"
                             value={String(it.qty)}
-                            onChange={(e) => setQty(it.productId, e.target.value)}
+                            onChange={(e) =>
+                              setQty(it.productId, e.target.value)
+                            }
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -305,8 +360,58 @@ export default function NovaRequisicaoPage() {
             </div>
 
             <form onSubmit={submitReq} className="mt-4 space-y-3">
+              {/* Criticidade */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">Observação (opcional)</label>
+                <span className="block text-sm font-medium text-gray-700">
+                  Criticidade
+                </span>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Escolha a situação do revendedor no momento do pedido.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCriticality("cashier")}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-medium " +
+                      (criticality === "cashier"
+                        ? "border-red-500 bg-red-50 text-red-800"
+                        : "border-red-200 bg-white text-red-700")
+                    }
+                  >
+                    Revendedor no caixa (alta)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCriticality("service")}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-medium " +
+                      (criticality === "service"
+                        ? "border-yellow-500 bg-yellow-50 text-yellow-800"
+                        : "border-yellow-200 bg-white text-yellow-700")
+                    }
+                  >
+                    Revendedor em atendimento
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCriticality("restock")}
+                    className={
+                      "rounded-full border px-3 py-1.5 text-xs font-medium " +
+                      (criticality === "restock"
+                        ? "border-green-500 bg-green-50 text-green-800"
+                        : "border-green-200 bg-white text-green-700")
+                    }
+                  >
+                    Abastecimento
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Observação (opcional)
+                </label>
                 <textarea
                   className="mt-1 w-full rounded-xl border px-3 py-2"
                   rows={3}
@@ -324,7 +429,9 @@ export default function NovaRequisicaoPage() {
                 >
                   {saving ? "Enviando..." : "Criar Requisição"}
                 </button>
-                <span className="text-xs text-gray-500">Itens: {cartArr.length}</span>
+                <span className="text-xs text-gray-500">
+                  Itens: {cartArr.length}
+                </span>
               </div>
             </form>
           </section>

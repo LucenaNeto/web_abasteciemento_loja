@@ -8,12 +8,14 @@ import Link from "next/link";
 
 type ReqStatus = "pending" | "in_progress" | "completed" | "cancelled";
 type ItemStatus = "pending" | "partial" | "delivered" | "cancelled";
+type Criticality = "cashier" | "service" | "restock";
 
 type Req = {
   id: number;
   createdByUserId: number;
   assignedToUserId: number | null;
   status: ReqStatus;
+  criticality: Criticality; // 🔴🟡🟢
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -38,7 +40,7 @@ export default function ReqDetailPage() {
   const params = useParams<{ id: string }>();
   const id = useMemo(
     () => Number.parseInt(String(params?.id ?? "").trim(), 10),
-    [params]
+    [params],
   );
   const router = useRouter();
   const { data: session } = useSession();
@@ -63,7 +65,9 @@ export default function ReqDetailPage() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/requisicoes/${id}`, { cache: "no-store" });
+      const r = await fetch(`/api/requisicoes/${id}`, {
+        cache: "no-store",
+      });
       if (!r.ok) throw new Error(await safeText(r));
       const j = await r.json();
       setData(j.data);
@@ -88,7 +92,9 @@ export default function ReqDetailPage() {
       body: JSON.stringify({ status: "in_progress", assignToMe: true }),
     });
     if (!r.ok)
-      return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
+      return alert(
+        (await safeJson(r))?.error || `Falha (HTTP ${r.status})`,
+      );
     await load();
   }
 
@@ -100,7 +106,9 @@ export default function ReqDetailPage() {
       body: JSON.stringify({ status: "completed" }),
     });
     if (!r.ok)
-      return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
+      return alert(
+        (await safeJson(r))?.error || `Falha (HTTP ${r.status})`,
+      );
     await load();
   }
 
@@ -145,7 +153,9 @@ export default function ReqDetailPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-2xl border bg-white p-6">Carregando...</div>
+          <div className="rounded-2xl border bg-white p-6">
+            Carregando...
+          </div>
         ) : err ? (
           <div className="rounded-2xl border bg-white p-6 text-red-600">
             {err}
@@ -161,12 +171,18 @@ export default function ReqDetailPage() {
                 <h1 className="text-2xl font-semibold text-gray-900">
                   Requisição #{data.id}
                 </h1>
-                <p className="text-sm text-gray-600">
-                  Status: <Badge status={data.status} />{" "}
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600">
+                  <span>
+                    Status: <Badge status={data.status} />
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    • Criticidade:{" "}
+                    <CriticalityBadge
+                      criticality={data.criticality}
+                    />
+                  </span>
                   {data.assignedTo?.name ? (
-                    <span className="ml-2">
-                      • Responsável: {data.assignedTo.name}
-                    </span>
+                    <span>• Responsável: {data.assignedTo.name}</span>
                   ) : null}
                 </p>
                 {data.note ? (
@@ -228,7 +244,10 @@ export default function ReqDetailPage() {
                         const current =
                           editQty[it.id] ?? String(it.deliveredQty);
                         return (
-                          <tr key={it.id} className="border-t border-gray-100">
+                          <tr
+                            key={it.id}
+                            className="border-t border-gray-100"
+                          >
                             <td className="px-4 py-3">#{idx + 1}</td>
                             <td className="px-4 py-3">
                               <div className="font-medium">
@@ -241,7 +260,9 @@ export default function ReqDetailPage() {
                                   : ""}
                               </div>
                             </td>
-                            <td className="px-4 py-3">{it.requestedQty}</td>
+                            <td className="px-4 py-3">
+                              {it.requestedQty}
+                            </td>
                             <td className="px-4 py-3">
                               {editable ? (
                                 <input
@@ -323,6 +344,30 @@ function Badge({ status }: { status: ReqStatus }) {
   );
 }
 
+function CriticalityBadge({
+  criticality,
+}: {
+  criticality: Criticality;
+}) {
+  const cls: Record<Criticality, string> = {
+    cashier: "bg-red-100 text-red-800",
+    service: "bg-yellow-100 text-yellow-800",
+    restock: "bg-green-100 text-green-800",
+  };
+  const label: Record<Criticality, string> = {
+    cashier: "Revendedor no caixa",
+    service: "Revendedor em atendimento",
+    restock: "Abastecimento",
+  };
+  return (
+    <span
+      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${cls[criticality]}`}
+    >
+      {label[criticality]}
+    </span>
+  );
+}
+
 function SmallBadge({ status }: { status: ItemStatus }) {
   const map: Record<ItemStatus, string> = {
     pending: "bg-yellow-100 text-yellow-800",
@@ -351,7 +396,9 @@ function parseDbDateTime(value: string | null | undefined) {
   let s = value.trim();
 
   // Já vem em ISO com Z (ex.: 2025-11-18T14:10:30.000Z)
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(s)) {
+  if (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(s)
+  ) {
     return new Date(s);
   }
 

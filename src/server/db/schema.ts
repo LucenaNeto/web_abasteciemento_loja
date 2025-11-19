@@ -21,6 +21,9 @@ export type RequestStatus = (typeof requestStatus)[number];
 export const itemStatus = ["pending", "partial", "delivered", "cancelled"] as const;
 export type ItemStatus = (typeof itemStatus)[number];
 
+export const requestCriticality = ["cashier", "service", "restock"] as const;
+export type RequestCriticality = (typeof requestCriticality)[number];
+
 /* =========================
  * Users
  * =======================*/
@@ -106,6 +109,12 @@ export const requests = sqliteTable(
       .references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
 
     status: text("status", { enum: requestStatus }).notNull().default("pending").$type<RequestStatus>(),
+
+    // 🔴🟡🟢 Criticidade da requisição
+    criticality: text("criticality", { enum: requestCriticality })
+      .notNull()
+      .default("restock")
+      .$type<RequestCriticality>(),
 
     note: text("note"),
 

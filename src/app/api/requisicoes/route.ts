@@ -10,11 +10,6 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/requisicoes
- * Query:
- *  - status: "pending" | "in_progress" | "completed" | "cancelled"
- *  - q: busca por id (numérico exato) OU em note (like)
- *  - createdBy: "me" | id numérico (opcional)
- *  - page, pageSize
  */
 export async function GET(req: Request) {
   const guard = await ensureRoleApi(["admin", "store", "warehouse"]);
@@ -25,7 +20,10 @@ export async function GET(req: Request) {
   const q = (searchParams.get("q") ?? "").trim();
   const createdBy = (searchParams.get("createdBy") ?? "").trim();
   const page = Math.max(1, Number(searchParams.get("page") ?? "1"));
-  const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize") ?? "20")));
+  const pageSize = Math.min(
+    100,
+    Math.max(1, Number(searchParams.get("pageSize") ?? "20")),
+  );
   const offset = (page - 1) * pageSize;
 
   const filters: any[] = [];
@@ -75,7 +73,10 @@ export async function GET(req: Request) {
       page,
       pageSize,
       total: Number(count ?? 0),
-      totalPages: Math.max(1, Math.ceil(Number(count ?? 0) / pageSize)),
+      totalPages: Math.max(
+        1,
+        Math.ceil(Number(count ?? 0) / pageSize),
+      ),
     },
   });
 }
@@ -85,21 +86,23 @@ export async function GET(req: Request) {
  * Body:
  *  {
  *    note?: string,
+ *    criticality?: "cashier" | "service" | "restock",
  *    items: Array<{ productId: number, requestedQty: number }>
  *  }
- * Regras:
- *  - Admin e Store podem criar.
- *  - items: >= 1, requestedQty >= 1, productId válido e ativo.
- *  - status inicial: "pending"; createdByUserId = usuário atual.
  */
 const createSchema = z.object({
   note: z.string().max(500).optional().default(""),
-  items: z.array(
-    z.object({
-      productId: z.number().int().positive(),
-      requestedQty: z.number().int().min(1),
-    }),
-  ).min(1, "Informe pelo menos 1 item."),
+  criticality: z
+    .enum(["cashier", "service", "restock"])
+    .default("restock"),
+  items: z
+    .array(
+      z.object({
+        productId: z.number().int().positive(),
+        requestedQty: z.number().int().min(1),
+      }),
+    )
+    .min(1, "Informe pelo menos 1 item."),
 });
 
 export async function POST(req: Request) {
@@ -157,6 +160,7 @@ export async function POST(req: Request) {
         createdByUserId: userId,
         assignedToUserId: null,
         status: "pending",
+        criticality: payload.criticality, // 🔴🟡🟢 salva criticidade
         note: payload.note || null,
       })
       .returning({ id: schema.requests.id });
@@ -164,16 +168,16 @@ export async function POST(req: Request) {
     const requestId = res[0]?.id as number;
 
     // cria itens
-    const itemsToInsert: typeof schema.requestItems.$inferInsert[] = payload.items.map((it) => ({
+    const itemsToInsert: typeof schema.requestItems.$inferInsert[] =
+      payload.items.map((it) => ({
         requestId,
         productId: it.productId,
         requestedQty: it.requestedQty,
         deliveredQty: 0,
         status: "pending" as const, // <- garante literal compatível
-    }));
+      }));
 
     await tx.insert(schema.requestItems).values(itemsToInsert);
-
 
     // auditoria
     await tx.insert(schema.auditLogs).values({
@@ -181,7 +185,14 @@ export async function POST(req: Request) {
       action: "CREATE",
       recordId: String(requestId),
       userId: Number.isFinite(userId) ? userId : null,
-      payload: JSON.stringify({ after: { requestId, note: payload.note, items: payload.items } }),
+      payload: JSON.stringify({
+        after: {
+          requestId,
+          note: payload.note,
+          criticality: payload.criticality,
+          items: payload.items,
+        },
+      }),
     });
 
     // retorna a request criada (sem join por simplicidade)

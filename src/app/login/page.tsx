@@ -1,13 +1,13 @@
-// src/app/login/page.tsx
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -37,8 +37,6 @@ export default function LoginPage() {
       callbackUrl: "/", // depois vamos redirecionar para o dashboard
     });
 
-    // Quando redirect:true, o NextAuth redireciona automaticamente.
-    // Em caso de falha, ele volta com ?error= na URL (capturamos no useEffect).
     if (result?.error) {
       setErrorMsg("Falha ao autenticar. Revise suas credenciais.");
       setLoading(false);
@@ -46,11 +44,20 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow p-6">
-        <h1 className="text-2xl font-semibold text-gray-900 text-center">Acessar o Sistema</h1>
-        <p className="mt-2 text-sm text-gray-500 text-center">
-          Sistema de Reposição (Loja ↔ Almoxarifado)
+    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+      {/* Card com borda e sombra suave */}
+      <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm">
+        
+        {/* Logo Componentizada */}
+        <div className="mb-6 flex justify-center">
+          <BrandLogo showText />
+        </div>
+
+        <h1 className="text-center text-2xl font-semibold text-gray-900">
+          Acessar o Sistema
+        </h1>
+        <p className="mt-2 text-center text-sm text-gray-500">
+          Faça login para continuar
         </p>
 
         {errorMsg && (
@@ -61,7 +68,9 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">E-mail</label>
+            <label className="block text-sm font-medium text-gray-700">
+              E-mail
+            </label>
             <input
               type="email"
               autoComplete="email"
@@ -74,7 +83,9 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Senha</label>
+            <label className="block text-sm font-medium text-gray-700">
+              Senha
+            </label>
             <input
               type="password"
               autoComplete="current-password"
@@ -89,7 +100,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 w-full rounded-xl bg-gray-900 px-4 py-2.5 text-white font-medium hover:bg-gray-800 disabled:opacity-60"
+            className="mt-2 w-full rounded-xl bg-gray-900 px-4 py-2.5 font-medium text-white hover:bg-gray-800 disabled:opacity-60"
           >
             {loading ? "Entrando..." : "Entrar"}
           </button>
@@ -105,8 +116,8 @@ export default function LoginPage() {
           </div>
         </form>
 
-        <p className="mt-6 text-xs text-center text-gray-400">
-          Use o admin seed: <strong>admin@example.com / admin123</strong>
+        <p className="mt-6 text-[11px] text-gray-400 text-center">
+          Em caso de dúvida, contate o setor de Inteligência.
         </p>
       </div>
     </main>

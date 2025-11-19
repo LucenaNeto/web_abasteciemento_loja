@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation"; // App Router ✅
 
 type Role = "admin" | "store" | "warehouse";
+type Criticality = "cashier" | "service" | "restock";
 
 type ReqRow = {
   id: number;
@@ -14,6 +15,7 @@ type ReqRow = {
   createdAt: string;
   createdByName?: string | null;
   itemsCount?: number | null;
+  criticality: Criticality; // 🔴🟡🟢
 };
 
 type ListResp = {
@@ -73,37 +75,39 @@ export default function PendentesAlmoxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, canHandle, query]);
 
-  async function atender(id: number) {
-    if (!canHandle) return;
-    setAttendingId(id);
-    try {
-      // endpoint preferencial
-      let resp = await fetch(`/api/requisicoes/${id}/status`, {
+async function atender(id: number) {
+  if (!canHandle) return;
+  setAttendingId(id);
+  try {
+    // endpoint preferencial: tenta rota dedicada de status
+    let resp = await fetch(`/api/requisicoes/${id}/status`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      // 🔴 manda assignToMe: true para registrar o responsável
+      body: JSON.stringify({ status: "in_progress", assignToMe: true }),
+    });
+
+    // fallback se não existir rota dedicada (/status)
+    if (resp.status === 404) {
+      resp = await fetch(`/api/requisicoes/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "in_progress" }),
+        // 🔴 idem aqui
+        body: JSON.stringify({ status: "in_progress", assignToMe: true }),
       });
-
-      // fallback se não existir rota dedicada
-      if (resp.status === 404) {
-        resp = await fetch(`/api/requisicoes/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: "in_progress" }),
-        });
-      }
-
-      // trata 204/sem corpo JSON
-      const j = await maybeJson(resp);
-      if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
-
-      router.push(`/requisicoes/${id}/atender`);
-    } catch (e: any) {
-      alert(`Falha ao marcar como "em progresso": ${String(e?.message ?? e)}`);
-    } finally {
-      setAttendingId(null);
     }
+
+    const j = await maybeJson(resp);
+    if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
+
+    router.push(`/requisicoes/${id}/atender`);
+  } catch (e: any) {
+    alert(`Falha ao marcar como "em progresso": ${String(e?.message ?? e)}`);
+  } finally {
+    setAttendingId(null);
   }
+}
+
 
   if (status === "loading") return <div className="p-6">Carregando...</div>;
   if (!canHandle) {
@@ -128,7 +132,9 @@ export default function PendentesAlmoxPage() {
         <header className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Fila — Pendentes</h1>
-            <p className="text-sm text-gray-600">Atenda as requisições marcando como <em>em progresso</em> e depois conclua no detalhe.</p>
+            <p className="text-sm text-gray-600">
+              Atenda as requisições marcando como <em>em progresso</em> e depois conclua no detalhe.
+            </p>
           </div>
           <div className="text-sm text-gray-600">Total: <strong>{total}</strong></div>
         </header>
@@ -143,7 +149,10 @@ export default function PendentesAlmoxPage() {
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && (setPage(1), load())}
             />
-            <button onClick={() => (setPage(1), load())} className="rounded-xl border px-4 py-2 hover:bg-gray-50">
+            <button
+              onClick={() => (setPage(1), load())}
+              className="rounded-xl border px-4 py-2 hover:bg-gray-50"
+            >
               Aplicar
             </button>
           </div>
@@ -159,16 +168,29 @@ export default function PendentesAlmoxPage() {
                   <th className="px-4 py-3">Criado em</th>
                   <th className="px-4 py-3">Aberta por</th>
                   <th className="px-4 py-3">Itens</th>
+                  <th className="px-4 py-3">Criticidade</th>
                   <th className="px-4 py-3">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center">Carregando...</td></tr>
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center">
+                      Carregando...
+                    </td>
+                  </tr>
                 ) : err ? (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-red-600">{err}</td></tr>
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-red-600">
+                      {err}
+                    </td>
+                  </tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-500">Nenhuma requisição pendente.</td></tr>
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-gray-500">
+                      Nenhuma requisição pendente.
+                    </td>
+                  </tr>
                 ) : (
                   rows.map((r) => (
                     <tr key={r.id} className="border-t">
@@ -178,6 +200,9 @@ export default function PendentesAlmoxPage() {
                       </td>
                       <td className="px-4 py-3">{r.createdByName ?? "-"}</td>
                       <td className="px-4 py-3">{r.itemsCount ?? "-"}</td>
+                      <td className="px-4 py-3">
+                        <CriticalityBadge criticality={r.criticality} />
+                      </td>
                       <td className="px-4 py-3 flex gap-2">
                         <button
                           onClick={() => atender(r.id)}
@@ -204,7 +229,9 @@ export default function PendentesAlmoxPage() {
 
           {/* Paginação */}
           <div className="flex items-center justify-between p-4 text-sm text-gray-600">
-            <span>Página <strong>{page}</strong> de <strong>{totalPages}</strong></span>
+            <span>
+              Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+            </span>
             <div className="flex gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -228,7 +255,39 @@ export default function PendentesAlmoxPage() {
   );
 }
 
-/* -------- Helpers de data/hora (alinhados com tela de detalhes) -------- */
+/* -------- Criticidade badge -------- */
+
+function CriticalityBadge({
+  criticality,
+}: {
+  criticality?: Criticality | null;
+}) {
+  if (!criticality) {
+    return <span className="text-xs text-gray-400">-</span>;
+  }
+
+  const cls: Record<Criticality, string> = {
+    cashier: "bg-red-100 text-red-800",
+    service: "bg-yellow-100 text-yellow-800",
+    restock: "bg-green-100 text-green-800",
+  };
+
+  const label: Record<Criticality, string> = {
+    cashier: "Rev. no caixa",
+    service: "Em atendimento",
+    restock: "Abastecimento",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${cls[criticality]}`}
+    >
+      {label[criticality]}
+    </span>
+  );
+}
+
+/* -------- Helpers de data/hora (já usados aqui) -------- */
 
 function parseDbDateTime(value: string | null | undefined) {
   if (!value) return null;

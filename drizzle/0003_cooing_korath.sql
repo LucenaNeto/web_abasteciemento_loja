@@ -1,0 +1,1 @@
+ALTER TABLE `requests` ADD `criticality` text DEFAULT 'restock' NOT NULL;
