@@ -10,6 +10,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/requisicoes
+ * Query:
+ *  - status: "pending" | "in_progress" | "completed" | "cancelled"
+ *  - q: busca por id (numérico exato) OU em note (like)
+ *  - createdBy: "me" | id numérico (opcional)
+ *  - page, pageSize
  */
 export async function GET(req: Request) {
   const guard = await ensureRoleApi(["admin", "store", "warehouse"]);
@@ -41,7 +46,9 @@ export async function GET(req: Request) {
   if (createdBy) {
     if (createdBy === "me") {
       const meId = Number((guard.session.user as any).id);
-      filters.push(eq(schema.requests.createdByUserId, meId));
+      if (Number.isFinite(meId)) {
+        filters.push(eq(schema.requests.createdByUserId, meId));
+      }
     } else {
       const idNum = Number(createdBy);
       if (Number.isFinite(idNum)) {
@@ -92,9 +99,7 @@ export async function GET(req: Request) {
  */
 const createSchema = z.object({
   note: z.string().max(500).optional().default(""),
-  criticality: z
-    .enum(["cashier", "service", "restock"])
-    .default("restock"),
+  criticality: z.enum(["cashier", "service", "restock"]).default("restock"),
   items: z
     .array(
       z.object({
@@ -149,14 +154,14 @@ export async function POST(req: Request) {
     );
   }
 
-  // 🔹 Garantir que temos um userId numérico
+  // 🔹 Resolver userId de forma segura (sem NaN)
   const sessionUser = guard.session.user as any;
   const sessionId = sessionUser?.id;
   const sessionEmail = sessionUser?.email as string | undefined;
 
   let userId: number | null = null;
 
-  // 1) tenta usar o id da sessão, se vier ok
+  // 1) tenta usar o id que veio na sessão
   if (sessionId != null) {
     const n = Number(sessionId);
     if (Number.isFinite(n)) {
@@ -164,7 +169,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2) fallback: busca no banco pelo e-mail da sessão
+  // 2) se não deu, tenta achar o usuário pelo e-mail
   if (!userId && sessionEmail) {
     const [u] = await db
       .select({ id: schema.users.id })
@@ -173,11 +178,18 @@ export async function POST(req: Request) {
       .limit(1);
 
     if (u) {
-      userId = Number(u.id);
+      const n = Number(u.id);
+      if (Number.isFinite(n)) {
+        userId = n;
+      }
     }
   }
 
   if (!userId) {
+    console.error("POST /api/requisicoes -> userId não encontrado", {
+      sessionId,
+      sessionEmail,
+    });
     return NextResponse.json(
       { error: "Usuário da sessão não encontrado no banco." },
       { status: 401 },
@@ -186,19 +198,21 @@ export async function POST(req: Request) {
 
   // Cria requisição + itens dentro de uma transação
   const created = await withTransaction(async (tx) => {
+    // cria request
     const res = await tx
       .insert(schema.requests)
       .values({
         createdByUserId: userId,
         assignedToUserId: null,
         status: "pending",
-        criticality: payload.criticality, // 🔴🟡🟢
+        criticality: payload.criticality, // 🔴🟡🟢 salva criticidade
         note: payload.note || null,
       })
       .returning({ id: schema.requests.id });
 
     const requestId = res[0]?.id as number;
 
+    // cria itens
     const itemsToInsert: typeof schema.requestItems.$inferInsert[] =
       payload.items.map((it) => ({
         requestId,
@@ -210,6 +224,7 @@ export async function POST(req: Request) {
 
     await tx.insert(schema.requestItems).values(itemsToInsert);
 
+    // auditoria
     await tx.insert(schema.auditLogs).values({
       tableName: "requests",
       action: "CREATE",
@@ -225,6 +240,7 @@ export async function POST(req: Request) {
       }),
     });
 
+    // retorna a request criada
     const [reqRow] = await tx
       .select()
       .from(schema.requests)
