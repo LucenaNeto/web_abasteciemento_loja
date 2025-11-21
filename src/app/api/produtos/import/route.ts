@@ -9,6 +9,7 @@ import { inArray, eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // segundos
 
 // POST multipart/form-data
 //   file: CSV ou Excel (.xlsx/.xls)
