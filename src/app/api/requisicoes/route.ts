@@ -149,42 +149,72 @@ export async function POST(req: Request) {
     );
   }
 
-  const userId = Number((guard.session.user as any).id);
+  // 🔹 Garantir que temos um userId numérico
+  const sessionUser = guard.session.user as any;
+  const sessionId = sessionUser?.id;
+  const sessionEmail = sessionUser?.email as string | undefined;
+
+  let userId: number | null = null;
+
+  // 1) tenta usar o id da sessão, se vier ok
+  if (sessionId != null) {
+    const n = Number(sessionId);
+    if (Number.isFinite(n)) {
+      userId = n;
+    }
+  }
+
+  // 2) fallback: busca no banco pelo e-mail da sessão
+  if (!userId && sessionEmail) {
+    const [u] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.email, sessionEmail))
+      .limit(1);
+
+    if (u) {
+      userId = Number(u.id);
+    }
+  }
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Usuário da sessão não encontrado no banco." },
+      { status: 401 },
+    );
+  }
 
   // Cria requisição + itens dentro de uma transação
   const created = await withTransaction(async (tx) => {
-    // cria request
     const res = await tx
       .insert(schema.requests)
       .values({
         createdByUserId: userId,
         assignedToUserId: null,
         status: "pending",
-        criticality: payload.criticality, // 🔴🟡🟢 salva criticidade
+        criticality: payload.criticality, // 🔴🟡🟢
         note: payload.note || null,
       })
       .returning({ id: schema.requests.id });
 
     const requestId = res[0]?.id as number;
 
-    // cria itens
     const itemsToInsert: typeof schema.requestItems.$inferInsert[] =
       payload.items.map((it) => ({
         requestId,
         productId: it.productId,
         requestedQty: it.requestedQty,
         deliveredQty: 0,
-        status: "pending" as const, // <- garante literal compatível
+        status: "pending" as const,
       }));
 
     await tx.insert(schema.requestItems).values(itemsToInsert);
 
-    // auditoria
     await tx.insert(schema.auditLogs).values({
       tableName: "requests",
       action: "CREATE",
       recordId: String(requestId),
-      userId: Number.isFinite(userId) ? userId : null,
+      userId,
       payload: JSON.stringify({
         after: {
           requestId,
@@ -195,7 +225,6 @@ export async function POST(req: Request) {
       }),
     });
 
-    // retorna a request criada (sem join por simplicidade)
     const [reqRow] = await tx
       .select()
       .from(schema.requests)
