@@ -5,7 +5,16 @@ import { getToken } from "next-auth/jwt";
 
 // Ajuste se necessário, mas o padrão abaixo cobre páginas (exclui _next, api, etc.)
 export const config = {
-  matcher: ["/((?!_next|api|favicon.ico|assets|public).*)"],
+  matcher: [
+    // protege tudo, EXCETO:
+    // - _next (arquivos internos do Next)
+    // - api (inclui /api/auth)
+    // - favicon.ico
+    // - assets
+    // - public
+    // - logo-grupo.png  ✅
+    "/((?!_next|api|favicon.ico|assets|public|logo-grupo.png).*)",
+  ],
 };
 
 export async function middleware(req: NextRequest) {
