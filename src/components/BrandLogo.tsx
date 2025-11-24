@@ -1,3 +1,4 @@
+// src/components/BrandLogo.tsx
 import Image from "next/image";
 import Link from "next/link";
 
@@ -20,7 +21,7 @@ export function BrandLogo({
       {/* Logo bem destacada */}
       <div className="relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-gray-300 bg-white shadow-md">
         <Image
-          src="/logo-grupo.png" // arquivo em /public
+          src="/logo-grupo.png"   // 👈 usa direto do /public
           alt="Logo do Grupo"
           fill
           className="object-contain"
