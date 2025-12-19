@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 import { z } from "zod";
 import { ensureRoleApi } from "@/server/auth/rbac";
 import { db, schema } from "@/server/db";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 // POST multipart/form-data
 //  - file: CSV/XLSX
 //  - delimiter: "," | ";" (somente CSV, opcional)
+//  - unitId: (via URL ?unitId=1 OU via formData unitId) ✅ obrigatório p/ preview correto
 export async function POST(req: Request) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
   if (!ct.includes("multipart/form-data")) {
     return NextResponse.json(
       { error: `Content-Type inválido (${ct}). Envie Body→Form (multipart/form-data).` },
-      { status: 415 }
+      { status: 415 },
     );
   }
 
@@ -31,8 +32,32 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json(
       { error: "Falha ao interpretar multipart. Remova Content-Type manual e use Body→Form." },
-      { status: 400 }
+      { status: 400 },
     );
+  }
+
+  const { searchParams } = new URL(req.url);
+
+  // ✅ unitId vindo da URL (?unitId=1) ou do formData (unitId)
+  const unitIdRaw = String(searchParams.get("unitId") ?? form.get("unitId") ?? "");
+  const unitId = Number(unitIdRaw);
+
+  if (!Number.isFinite(unitId) || unitId <= 0) {
+    return NextResponse.json(
+      { error: "Informe unitId válido. Ex: /api/produtos/import/preview?unitId=1" },
+      { status: 400 },
+    );
+  }
+
+  // ✅ garante que a unidade existe
+  const [unit] = await db
+    .select({ id: schema.units.id })
+    .from(schema.units)
+    .where(eq(schema.units.id, unitId))
+    .limit(1);
+
+  if (!unit) {
+    return NextResponse.json({ error: `Unidade ${unitId} não existe.` }, { status: 400 });
   }
 
   const filePart = getAnyFilePart(form);
@@ -40,7 +65,7 @@ export async function POST(req: Request) {
     const keys = Array.from(form.keys());
     return NextResponse.json(
       { error: `Nenhum arquivo encontrado. Chaves recebidas: ${keys.join(", ")}` },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -57,6 +82,7 @@ export async function POST(req: Request) {
 
   let records: any[] = [];
   let delimiterUsed: string | undefined = ",";
+
   if (isExcel) {
     records = parseXlsx(buf);
     delimiterUsed = undefined;
@@ -88,10 +114,10 @@ export async function POST(req: Request) {
         String(r.name ?? "").trim() ||
         String(r.nome ?? "").trim() ||
         String(r.descricao ?? r["descrição"] ?? "").trim();
-      const unit = String(r.unit ?? r.unidade ?? r.uni ?? r.und ?? "").trim() || "UN";
+      const unitTxt = String(r.unit ?? r.unidade ?? r.uni ?? r.und ?? "").trim() || "UN";
       const isActive = toBool(r.isActive ?? r.ativo ?? r.status);
 
-      const parsed = rowSchema.parse({ sku, name, unit, isActive });
+      const parsed = rowSchema.parse({ sku, name, unit: unitTxt, isActive });
 
       const key = parsed.sku.toUpperCase();
       if (seen.has(key)) {
@@ -102,31 +128,42 @@ export async function POST(req: Request) {
 
       cleaned.push({ row: parsed, line });
     } catch (e: any) {
-      const msg = e?.issues?.map((i: any) => i.message).join("; ") || String(e?.message ?? e);
+      const msg =
+        e?.issues?.map((i: any) => i.message).join("; ") || String(e?.message ?? e);
       errors.push({ line, error: `Linha inválida: ${msg}` });
     }
   });
 
   if (cleaned.length === 0) {
     return NextResponse.json(
-      { error: "Nenhuma linha válida.", details: errors, type: isExcel ? "excel" : "csv", delimiter: delimiterUsed },
-      { status: 400 }
+      {
+        unitId,
+        error: "Nenhuma linha válida.",
+        details: errors,
+        type: isExcel ? "excel" : "csv",
+        delimiter: delimiterUsed,
+      },
+      { status: 400 },
     );
   }
 
-  // checa existência no banco (sem gravar)
+  // ✅ checa existência no banco POR UNIDADE (unitId + sku)
   const skus = cleaned.map((c) => c.row.sku);
-  const existing = await db.select().from(schema.products).where(inArray(schema.products.sku, skus));
+  const existing = await db
+    .select({ sku: schema.products.sku })
+    .from(schema.products)
+    .where(and(eq(schema.products.unitId, unitId), inArray(schema.products.sku, skus)));
+
   const existingSet = new Set(existing.map((p) => p.sku.toUpperCase()));
 
   const total = cleaned.length;
   const uniqueSkus = seen.size;
-  const alreadyExists = cleaned.filter(c => existingSet.has(c.row.sku.toUpperCase())).length;
+  const alreadyExists = cleaned.filter((c) => existingSet.has(c.row.sku.toUpperCase())).length;
 
-  // exemplos de linhas normalizadas (máx 20)
-  const sample = cleaned.slice(0, 20).map(c => ({ line: c.line, ...c.row }));
+  const sample = cleaned.slice(0, 20).map((c) => ({ line: c.line, ...c.row }));
 
   return NextResponse.json({
+    unitId,
     type: isExcel ? "excel" : "csv",
     delimiter: delimiterUsed,
     stats: {
@@ -161,6 +198,7 @@ function detectDelimiter(s: string) {
   const semis = (s.match(/;/g) || []).length;
   return semis > commas ? ";" : ",";
 }
+
 function normalizeHeader(s: string) {
   return String(s || "")
     .toLowerCase()
@@ -207,7 +245,6 @@ function parseCsv(text: string, delimiter: string) {
 function parseXlsx(buf: Buffer) {
   const wb = XLSX.read(buf, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  // usa o texto exibido na planilha, preservando zeros à esquerda quando houver
   const arr = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false }) as any[];
   return arr.map((row) => {
     const out: any = {};
@@ -223,7 +260,7 @@ function toBool(v: any) {
   if (typeof v === "boolean") return v;
   const s = String(v ?? "").toLowerCase().trim();
   if (!s) return true;
-  if (["1","true","t","yes","y","sim","ativo","on"].includes(s)) return true;
-  if (["0","false","f","no","n","nao","não","inativo","off"].includes(s)) return false;
+  if (["1", "true", "t", "yes", "y", "sim", "ativo", "on"].includes(s)) return true;
+  if (["0", "false", "f", "no", "n", "nao", "não", "inativo", "off"].includes(s)) return false;
   return s as any;
 }

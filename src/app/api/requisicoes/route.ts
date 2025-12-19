@@ -5,18 +5,15 @@ import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
 import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 
-// ✅ importa as tabelas diretamente pra evitar erro "schema.units não existe" no build
-import { units, userUnits } from "@/server/db/schema";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Helpers */
 async function getDefaultUnitId() {
   const [u] = await db
-    .select({ id: units.id })
-    .from(units)
-    .where(eq(units.code, "00000"))
+    .select({ id: schema.units.id })
+    .from(schema.units)
+    .where(eq(schema.units.code, "00000"))
     .limit(1);
 
   return u?.id ?? null;
@@ -24,20 +21,19 @@ async function getDefaultUnitId() {
 
 async function getPrimaryUnitId(userId: number) {
   const [row] = await db
-    .select({ unitId: userUnits.unitId })
-    .from(userUnits)
-    .where(and(eq(userUnits.userId, userId), eq(userUnits.isPrimary, true)))
+    .select({ unitId: schema.userUnits.unitId })
+    .from(schema.userUnits)
+    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.isPrimary, true)))
     .limit(1);
 
   return row?.unitId ?? null;
 }
 
 async function userHasUnit(userId: number, unitId: number) {
-  // ✅ usa userUnits importado (não schema.userUnits), pra evitar erro de build
   const [row] = await db
     .select({ ok: sql<number>`1` })
-    .from(userUnits)
-    .where(and(eq(userUnits.userId, userId), eq(userUnits.unitId, unitId)))
+    .from(schema.userUnits)
+    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.unitId, unitId)))
     .limit(1);
 
   return !!row;
@@ -47,7 +43,7 @@ async function userHasUnit(userId: number, unitId: number) {
  * GET /api/requisicoes
  * Query:
  *  - status, q, createdBy, page, pageSize
- *  - unitId (opcional) ✅ novo
+ *  - unitId (opcional)
  */
 export async function GET(req: Request) {
   const guard = await ensureRoleApi(["admin", "store", "warehouse"]);
@@ -72,20 +68,19 @@ export async function GET(req: Request) {
 
   let unitId: number | null = Number.isFinite(unitIdFromQuery) ? unitIdFromQuery : null;
 
-  // Se não for admin e não veio unitId, usa unidade primária
+  // Se não for admin, resolve unidade (primária -> default)
   if (role !== "admin") {
     if (!Number.isFinite(meId)) {
       return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
     }
 
-    if (unitId == null) unitId = await getPrimaryUnitId(meId);
-    if (unitId == null) unitId = await getDefaultUnitId();
+    if (!unitId) unitId = await getPrimaryUnitId(meId);
+    if (!unitId) unitId = await getDefaultUnitId();
 
-    if (unitId == null) {
+    if (!unitId) {
       return NextResponse.json({ error: "Unidade não definida para o usuário." }, { status: 400 });
     }
 
-    // garante que usuário tem acesso à unidade
     const allowed = await userHasUnit(meId, unitId);
     if (!allowed) {
       return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
@@ -94,18 +89,13 @@ export async function GET(req: Request) {
 
   const filters: any[] = [];
 
-  // ✅ filtra por unidade quando resolvida/fornecida
-  if (unitId != null) filters.push(eq(schema.requests.unitId, unitId));
-
+  if (unitId) filters.push(eq(schema.requests.unitId, unitId));
   if (statusParam) filters.push(eq(schema.requests.status, statusParam as any));
 
   if (q) {
     const idNum = Number(q);
-    if (Number.isFinite(idNum)) {
-      filters.push(eq(schema.requests.id, idNum));
-    } else {
-      filters.push(like(schema.requests.note, `%${q}%`));
-    }
+    if (Number.isFinite(idNum)) filters.push(eq(schema.requests.id, idNum));
+    else filters.push(like(schema.requests.note, `%${q}%`));
   }
 
   if (createdBy) {
@@ -119,29 +109,18 @@ export async function GET(req: Request) {
 
   const whereClause = filters.length ? and(...filters) : undefined;
 
-  // Total
-  const [{ count }] = whereClause
-    ? await db
-        .select({ count: sql<number>`count(*)` })
-        .from(schema.requests)
-        .where(whereClause as any)
-    : await db.select({ count: sql<number>`count(*)` }).from(schema.requests);
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.requests)
+    .where(whereClause as any);
 
-  // Lista
-  const rows = whereClause
-    ? await db
-        .select()
-        .from(schema.requests)
-        .where(whereClause as any)
-        .orderBy(desc(schema.requests.id))
-        .limit(pageSize)
-        .offset(offset)
-    : await db
-        .select()
-        .from(schema.requests)
-        .orderBy(desc(schema.requests.id))
-        .limit(pageSize)
-        .offset(offset);
+  const rows = await db
+    .select()
+    .from(schema.requests)
+    .where(whereClause as any)
+    .orderBy(desc(schema.requests.id))
+    .limit(pageSize)
+    .offset(offset);
 
   return NextResponse.json({
     data: rows,
@@ -156,16 +135,9 @@ export async function GET(req: Request) {
 
 /**
  * POST /api/requisicoes
- * Body:
- *  {
- *    unitId?: number ✅ novo (opcional por enquanto)
- *    note?: string,
- *    criticality?: "cashier" | "service" | "restock",
- *    items: Array<{ productId: number, requestedQty: number }>
- *  }
  */
 const createSchema = z.object({
-  unitId: z.number().int().positive().optional(),
+  unitId: z.number().int().positive().optional(), // ✅ novo
   note: z.string().max(500).optional().default(""),
   criticality: z.enum(["cashier", "service", "restock"]).default("restock"),
   items: z
@@ -192,7 +164,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // Checa duplicidade
   const ids = payload.items.map((i) => i.productId);
   if (new Set(ids).size !== ids.length) {
     return NextResponse.json({ error: "Itens duplicados: remova produtos repetidos." }, { status: 400 });
@@ -205,7 +176,6 @@ export async function POST(req: Request) {
   const sessionEmail = sessionUser?.email as string | undefined;
 
   let userId: number | null = null;
-
   if (sessionId != null) {
     const n = Number(sessionId);
     if (Number.isFinite(n)) userId = n;
@@ -229,24 +199,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Usuário da sessão não encontrado no banco." }, { status: 401 });
   }
 
-  // ✅ resolve unitId (body -> primary -> default 00000)
+  // ✅ resolve unitId (body -> primary -> default)
   let unitId: number | null = payload.unitId ?? null;
-  if (unitId == null) unitId = await getPrimaryUnitId(userId);
-  if (unitId == null) unitId = await getDefaultUnitId();
+  if (!unitId) unitId = await getPrimaryUnitId(userId);
+  if (!unitId) unitId = await getDefaultUnitId();
 
-  if (unitId == null) {
+  if (!unitId) {
     return NextResponse.json({ error: "Unidade não definida." }, { status: 400 });
   }
 
-  // ✅ regra: store só pode usar unidades do cadastro (admin pode tudo)
   if (role !== "admin") {
     const allowed = await userHasUnit(userId, unitId);
-    if (!allowed) {
-      return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
-    }
+    if (!allowed) return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
   }
 
-  // ✅ valida produtos EXISTEM, ATIVOS e DA MESMA UNIDADE
+  // ✅ valida produtos da mesma unidade
   const prods = await db
     .select()
     .from(schema.products)
@@ -259,8 +226,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const inativos = prods.filter((p) => !p.isActive);
-  if (inativos.length > 0) {
+  if (prods.some((p) => !p.isActive)) {
     return NextResponse.json({ error: "Há produto(s) inativo(s) no pedido." }, { status: 400 });
   }
 
@@ -268,7 +234,7 @@ export async function POST(req: Request) {
     const res = await tx
       .insert(schema.requests)
       .values({
-        unitId, // ✅ FIX do 500 em produção (unit_id NOT NULL)
+        unitId, // ✅ FIX do 500 (NOT NULL)
         createdByUserId: userId,
         assignedToUserId: null,
         status: "pending",
@@ -277,17 +243,17 @@ export async function POST(req: Request) {
       })
       .returning({ id: schema.requests.id });
 
-    const requestId = res[0]?.id as number;
+    const requestId = res[0]!.id;
 
-    const itemsToInsert: typeof schema.requestItems.$inferInsert[] = payload.items.map((it) => ({
-      requestId,
-      productId: it.productId,
-      requestedQty: it.requestedQty,
-      deliveredQty: 0,
-      status: "pending" as const,
-    }));
-
-    await tx.insert(schema.requestItems).values(itemsToInsert);
+    await tx.insert(schema.requestItems).values(
+      payload.items.map((it) => ({
+        requestId,
+        productId: it.productId,
+        requestedQty: it.requestedQty,
+        deliveredQty: 0,
+        status: "pending" as const,
+      })),
+    );
 
     await tx.insert(schema.auditLogs).values({
       tableName: "requests",
