@@ -1,303 +1,308 @@
 // src/app/api/produtos/import/route.ts
 import { NextResponse } from "next/server";
-import { parse } from "csv-parse/sync";
 import { z } from "zod";
-import * as XLSX from "xlsx";
-import { db, schema, withTransaction } from "@/server/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
+
+import { db, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { inArray, eq } from "drizzle-orm";
+
+// ✅ IMPORTA AS TABELAS DIRETAMENTE (evita o erro "schema.units não existe" no build)
+import { products, units } from "@/server/db/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // segundos
 
-// POST multipart/form-data
-//   file: CSV ou Excel (.xlsx/.xls)
-//   mode: "insert" | "upsert" (default: insert)
-//   delimiter: "," | ";"  (apenas p/ CSV; opcional)
+/**
+ * Esperado (de planilha/CSV/JSON):
+ * sku (obrigatório)
+ * name (obrigatório)
+ * unit (opcional) -> default "UN"
+ * isActive (opcional) -> default true
+ * stock (opcional) -> default 0
+ */
+type ImportRow = {
+  sku: string;
+  name: string;
+  unit?: string | null;
+  isActive?: boolean | null;
+  stock?: number | null;
+};
+
+const jsonBodySchema = z.object({
+  // ✅ opcional: pode mandar unitId no JSON também
+  unitId: z.number().int().positive().optional(),
+  rows: z.array(
+    z.object({
+      sku: z.string().min(1),
+      name: z.string().min(1),
+      unit: z.string().optional(),
+      isActive: z.boolean().optional(),
+      stock: z.number().int().optional(),
+    }),
+  ),
+});
+
+function normalizeSku(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function normalizeName(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function normalizeUnit(v: unknown) {
+  const s = String(v ?? "").trim();
+  return s || "UN";
+}
+
+function normalizeBool(v: unknown, def = true) {
+  if (v === null || v === undefined || v === "") return def;
+  if (typeof v === "boolean") return v;
+  const s = String(v).trim().toLowerCase();
+  if (["1", "true", "sim", "yes", "y"].includes(s)) return true;
+  if (["0", "false", "nao", "não", "no", "n"].includes(s)) return false;
+  return def;
+}
+
+function normalizeInt(v: unknown, def = 0) {
+  if (v === null || v === undefined || v === "") return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : def;
+}
+
+async function getDefaultUnitId() {
+  const [u] = await db
+    .select({ id: units.id })
+    .from(units)
+    .where(eq(units.code, "00000"))
+    .limit(1);
+
+  return u?.id ?? null;
+}
+
+function chunk<T>(arr: T[], size: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function parseCsvToRows(csvText: string): ImportRow[] {
+  // CSV simples (separador , ou ;)
+  const lines = csvText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return [];
+
+  const sep = lines[0].includes(";") && !lines[0].includes(",") ? ";" : ",";
+  const headers = lines[0].split(sep).map((h) => h.trim().toLowerCase());
+
+  const idxSku = headers.indexOf("sku");
+  const idxName = headers.indexOf("name");
+  const idxUnit = headers.indexOf("unit");
+  const idxIsActive = headers.indexOf("isactive");
+  const idxStock = headers.indexOf("stock");
+
+  const rows: ImportRow[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(sep).map((c) => c.trim());
+
+    const sku = normalizeSku(cols[idxSku] ?? "");
+    const name = normalizeName(cols[idxName] ?? "");
+
+    if (!sku || !name) continue;
+
+    rows.push({
+      sku,
+      name,
+      unit: normalizeUnit(cols[idxUnit]),
+      isActive: idxIsActive >= 0 ? normalizeBool(cols[idxIsActive], true) : true,
+      stock: idxStock >= 0 ? normalizeInt(cols[idxStock], 0) : 0,
+    });
+  }
+
+  return rows;
+}
+
+async function parseXlsxToRows(file: File): Promise<ImportRow[]> {
+  // dependência: xlsx
+  const XLSX = await import("xlsx");
+
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return [];
+
+  const ws = wb.Sheets[sheetName];
+  const json = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
+
+  // tenta mapear colunas por nome
+  const rows: ImportRow[] = [];
+
+  for (const r of json) {
+    // aceita variações: SKU/sku, Nome/name, Unidade/unit, Ativo/isActive, Estoque/stock
+    const sku = normalizeSku(r.sku ?? r.SKU ?? r.Sku);
+    const name = normalizeName(r.name ?? r.Nome ?? r.NOME ?? r.Name);
+
+    if (!sku || !name) continue;
+
+    const unit = normalizeUnit(r.unit ?? r.Unidade ?? r.UNIDADE);
+    const isActive = normalizeBool(r.isActive ?? r.Ativo ?? r.ATIVO, true);
+    const stock = normalizeInt(r.stock ?? r.Estoque ?? r.ESTOQUE, 0);
+
+    rows.push({ sku, name, unit, isActive, stock });
+  }
+
+  return rows;
+}
+
+/**
+ * POST /api/produtos/import?unitId=123
+ * - FormData: { file: File }  (xlsx/csv)
+ * - OU JSON: { unitId?: number, rows: ImportRow[] }
+ */
 export async function POST(req: Request) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
 
-const form = await req.formData();
-const mode = String(form.get("mode") ?? "insert").toLowerCase();
+  const url = new URL(req.url);
+  const unitIdParam = url.searchParams.get("unitId");
+  const unitIdFromQuery = unitIdParam ? Number(unitIdParam) : NaN;
 
-// tenta pegar o arquivo por várias chaves comuns e/ou vasculha todas as entries
-function getAnyFilePart(fd: FormData) {
-  const keys = ["file", "files", "upload", "arquivo", "data"];
-  for (const k of keys) {
-    const v = fd.get(k) as any;
-    if (v && typeof v.arrayBuffer === "function") return v;
-  }
-  for (const [, v] of fd.entries()) {
-    const anyv = v as any;
-    if (anyv && typeof anyv.arrayBuffer === "function") return anyv;
-  }
-  return null;
-}
+  const contentType = req.headers.get("content-type") ?? "";
 
-const filePart: any = getAnyFilePart(form);
-if (!filePart) {
-  // ajuda a diagnosticar quando o cliente manda algo esquisito
-  const keys = Array.from(form.keys());
-  return NextResponse.json(
-    { error: `Nenhum arquivo encontrado no multipart. Chaves recebidas: ${keys.join(", ")}` },
-    { status: 400 },
-  );
-}
+  let incomingUnitId: number | null = Number.isFinite(unitIdFromQuery) ? unitIdFromQuery : null;
+  let rows: ImportRow[] = [];
 
+  // 1) JSON (compatível com import antigo, se existir)
+  if (contentType.includes("application/json")) {
+    const body = await req.json().catch(() => null);
+    const parsed = jsonBodySchema.safeParse(body);
 
-  if (mode !== "insert" && mode !== "upsert") {
-    return NextResponse.json({ error: `mode deve ser 'insert' ou 'upsert'` }, { status: 400 });
-  }
-
-  const ab = await (filePart as any).arrayBuffer();
-  const buf = Buffer.from(ab);
-
-  // Detecta tipo pelo nome ou content-type
-  const fileName = String((filePart as any).name ?? "").toLowerCase();
-  const ctype = String((filePart as any).type ?? "").toLowerCase();
-  const isExcel =
-    fileName.endsWith(".xlsx") ||
-    fileName.endsWith(".xls") ||
-    ctype.includes("sheet") ||
-    ctype.includes("excel");
-
-  let records: any[] = [];
-  let delimiterUsed = ",";
-
-  if (isExcel) {
-    records = parseXlsx(buf); // primeira planilha
-  } else {
-    const csvText = buf.toString("utf8");
-    const delimiterParam = form.get("delimiter")?.toString();
-    delimiterUsed = delimiterParam ?? detectDelimiter(csvText);
-    records = parseCsv(csvText, delimiterUsed);
-  }
-
-  // Validação/normalização
-  const rowSchema = z.object({
-    sku: z.string().min(1).max(64),
-    name: z.string().min(1).max(255),
-    unit: z.string().min(1).max(10).optional().default("UN"),
-    isActive: z.boolean().optional().default(true),
-  });
-  type CleanRow = z.infer<typeof rowSchema>;
-
-  const cleaned: Array<{ row: CleanRow; line: number }> = [];
-  const errors: Array<{ line: number; error: string }> = [];
-  const seen = new Set<string>();
-
-  records.forEach((r, idx) => {
-    const line = (r.__line ?? (idx + 2)) as number; // heurística p/ linha real
-    try {
-      const sku = String(r.sku ?? r.SKU ?? "").trim();
-      const name =
-        String(r.name ?? "").trim() ||
-        String(r.nome ?? "").trim() ||
-        String(r.descricao ?? r["descrição"] ?? "").trim();
-      const unit = String(r.unit ?? r.unidade ?? r.uni ?? r.und ?? "").trim() || "UN";
-      const isActiveRaw = r.isActive ?? r.ativo ?? r.status;
-      const isActive = toBool(isActiveRaw);
-
-      const parsed = rowSchema.parse({ sku, name, unit, isActive });
-
-      const key = parsed.sku.toUpperCase();
-      if (seen.has(key)) {
-        errors.push({ line, error: "SKU duplicado no arquivo." });
-        return;
-      }
-      seen.add(key);
-
-      cleaned.push({ row: parsed, line });
-    } catch (e: any) {
-      const msg = e?.issues?.map((i: any) => i.message).join("; ") || String(e?.message ?? e);
-      errors.push({ line, error: `Linha inválida: ${msg}` });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "JSON inválido", details: parsed.error.issues },
+        { status: 400 },
+      );
     }
-  });
+
+    incomingUnitId = incomingUnitId ?? parsed.data.unitId ?? null;
+    rows = parsed.data.rows;
+  } else {
+    // 2) FormData com arquivo
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return NextResponse.json(
+        { error: "Envie um arquivo via multipart/form-data (campo 'file') ou JSON." },
+        { status: 400 },
+      );
+    }
+
+    const file = form.get("file");
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { error: "Arquivo não encontrado. Envie no campo 'file'." },
+        { status: 400 },
+      );
+    }
+
+    const fname = (file.name || "").toLowerCase();
+
+    if (fname.endsWith(".csv")) {
+      const text = await file.text();
+      rows = parseCsvToRows(text);
+    } else if (fname.endsWith(".xlsx") || fname.endsWith(".xls")) {
+      rows = await parseXlsxToRows(file);
+    } else {
+      return NextResponse.json(
+        { error: "Formato não suportado. Use .csv ou .xlsx" },
+        { status: 400 },
+      );
+    }
+  }
+
+  // resolve unitId (query -> body -> default 00000)
+  let unitId = incomingUnitId;
+  if (!unitId) unitId = await getDefaultUnitId();
+
+  if (!unitId) {
+    return NextResponse.json(
+      { error: "unitId é obrigatório (e a unidade 00000 não existe no banco)." },
+      { status: 400 },
+    );
+  }
+
+  // sanitiza/valida linhas
+  const cleaned: ImportRow[] = rows
+    .map((r) => ({
+      sku: normalizeSku(r.sku),
+      name: normalizeName(r.name),
+      unit: normalizeUnit(r.unit),
+      isActive: normalizeBool(r.isActive, true),
+      stock: normalizeInt(r.stock, 0),
+    }))
+    .filter((r) => r.sku && r.name);
 
   if (cleaned.length === 0) {
-    return NextResponse.json({ error: "Nenhuma linha válida.", details: errors }, { status: 400 });
+    return NextResponse.json(
+      { error: "Nenhuma linha válida encontrada (precisa de sku e name)." },
+      { status: 400 },
+    );
   }
 
-  // Consulta existentes
-  const skus = cleaned.map((c) => c.row.sku);
-  const existing = await db.select().from(schema.products).where(inArray(schema.products.sku, skus));
-  const bySku = new Map(existing.map((p) => [p.sku.toUpperCase(), p]));
-  const adminId = Number((guard.session.user as any).id);
+  // opcional: remove duplicados por sku na mesma carga (último vence)
+  const map = new Map<string, ImportRow>();
+  for (const r of cleaned) map.set(r.sku, r);
+  const uniqueRows = Array.from(map.values());
 
-  const summary = { inserted: 0, updated: 0, skipped: 0, errors };
+  // ✅ Upsert em lote (menos roundtrips)
+  // Ajuste CHUNK_SIZE se precisar
+  const CHUNK_SIZE = 500;
+
+  const payloadToInsert = uniqueRows.map((r) => ({
+    unitId, // ✅ obrigatório agora
+    sku: r.sku,
+    name: r.name,
+    unit: r.unit ?? "UN",
+    isActive: r.isActive ?? true,
+    stock: r.stock ?? 0,
+  }));
 
   await withTransaction(async (tx) => {
-    for (const { row, line } of cleaned) {
-      const key = row.sku.toUpperCase();
-      const current = bySku.get(key);
-
-      if (!current) {
-        try {
-          const ins = await tx
-            .insert(schema.products)
-            .values({
-              sku: row.sku,
-              name: row.name,
-              unit: row.unit ?? "UN",
-              isActive: row.isActive ?? true,
-            })
-            .returning({ id: schema.products.id });
-
-          const id = ins[0]?.id;
-          await tx.insert(schema.auditLogs).values({
-            tableName: "products",
-            action: "CREATE",
-            recordId: String(id),
-            userId: Number.isFinite(adminId) ? adminId : null,
-            payload: JSON.stringify({ after: { id, ...row }, source: "import" }),
-          });
-          summary.inserted += 1;
-        } catch (e: any) {
-          summary.errors.push({ line, error: `Falha ao inserir: ${String(e?.message ?? e)}` });
-        }
-        continue;
-      }
-
-      if (mode === "insert") {
-        summary.skipped += 1;
-        continue;
-      }
-
-      const patch: Partial<typeof schema.products.$inferInsert> = {};
-      let changed = false;
-
-      if (row.name && row.name !== current.name) {
-        patch.name = row.name;
-        changed = true;
-      }
-      if (row.unit && row.unit !== current.unit) {
-        patch.unit = row.unit;
-        changed = true;
-      }
-      if (typeof row.isActive === "boolean" && row.isActive !== current.isActive) {
-        patch.isActive = row.isActive;
-        changed = true;
-      }
-
-      if (!changed) {
-        summary.skipped += 1;
-        continue;
-      }
-
-      try {
-        await tx
-          .update(schema.products)
-          .set({ ...patch, updatedAt: new Date() })
-          .where(eq(schema.products.id, current.id));
-
-        await tx.insert(schema.auditLogs).values({
-          tableName: "products",
-          action: "UPDATE",
-          recordId: String(current.id),
-          userId: Number.isFinite(adminId) ? adminId : null,
-          payload: JSON.stringify({
-            before: { name: current.name, unit: current.unit, isActive: current.isActive },
-            after: {
-              name: patch.name ?? current.name,
-              unit: patch.unit ?? current.unit,
-              isActive: patch.isActive ?? current.isActive,
-            },
-            source: "import",
-          }),
+    for (const part of chunk(payloadToInsert, CHUNK_SIZE)) {
+      await tx
+        .insert(products)
+        .values(part)
+        .onConflictDoUpdate({
+          // ✅ conflito composto
+          target: [products.unitId, products.sku],
+          // ✅ usa EXCLUDED (funciona bem em lote)
+          set: {
+            name: sql`excluded.name`,
+            unit: sql`excluded.unit`,
+            isActive: sql`excluded.is_active`,
+            stock: sql`excluded.stock`,
+            updatedAt: sql`now()`,
+          },
         });
-
-        summary.updated += 1;
-      } catch (e: any) {
-        summary.errors.push({ line, error: `Falha ao atualizar: ${String(e?.message ?? e)}` });
-      }
     }
   });
 
-  return NextResponse.json({
-    mode,
-    type: isExcel ? "excel" : "csv",
-    delimiter: isExcel ? undefined : delimiterUsed,
-    summary,
-  });
-}
-
-// ----------------- Helpers -----------------
-
-function detectDelimiter(s: string) {
-  const commas = (s.match(/,/g) || []).length;
-  const semis = (s.match(/;/g) || []).length;
-  return semis > commas ? ";" : ",";
-}
-function normalizeHeader(s: string) {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/\s+/g, "")
-    .trim();
-}
-
-// mapeia sinônimos pt/en → chaves canônicas
-const synonymMap: Record<string, string> = {
-  sku: "sku",
-  codigo: "sku",
-  "codigo/produto": "sku",
-  código: "sku",
-  name: "name",
-  nome: "name",
-  descricao: "name",
-  descrição: "name",
-  unit: "unit",
-  unidade: "unit",
-  uni: "unit",
-  und: "unit",
-  isactive: "isActive",
-  is_active: "isActive",
-  ativo: "isActive",
-  status: "isActive",
-};
-
-// CSV
-function parseCsv(text: string, delimiter: string) {
-  const records = parse(text, {
-    delimiter,
-    bom: true,
-    trim: true,
-    relax_column_count: true,
-    skip_empty_lines: true,
-    columns: (headers: string[]) =>
-      headers.map((h) => {
-        const k = normalizeHeader(h);
-        return synonymMap[k] ?? h;
-      }),
-  }) as any[];
-  return records;
-}
-
-// Excel (.xlsx/.xls) — pega a primeira planilha
-function parseXlsx(buf: Buffer) {
-  const wb = XLSX.read(buf, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  // usa o texto exibido na planilha, preservando zeros à esquerda quando houver
-  const arr = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false }) as any[];
-  return arr.map((row) => {
-    const out: any = {};
-    for (const key of Object.keys(row)) {
-      const k = synonymMap[normalizeHeader(key)] ?? key;
-      out[k] = row[key];
-    }
-    return out;
-  });
-}
-
-// Converte formatos comuns → boolean
-function toBool(v: any) {
-  if (typeof v === "boolean") return v;
-  const s = String(v ?? "").toLowerCase().trim();
-  if (!s) return true; // vazio = default true
-  if (["1", "true", "t", "yes", "y", "sim", "ativo", "on"].includes(s)) return true;
-  if (["0", "false", "f", "no", "n", "nao", "não", "inativo", "off"].includes(s)) return false;
-  return s as any; // deixa o Zod acusar se for inválido
+  return NextResponse.json(
+    {
+      ok: true,
+      unitId,
+      received: rows.length,
+      valid: cleaned.length,
+      unique: uniqueRows.length,
+      message: "Import concluído (upsert por unidade + sku).",
+    },
+    { status: 200 },
+  );
 }
