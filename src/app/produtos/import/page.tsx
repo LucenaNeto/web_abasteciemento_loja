@@ -73,7 +73,7 @@ export default function ImportProdutosPage() {
       fd.append("mode", mode);
       if (delimiter) fd.append("delimiter", delimiter);
 
-      const r = await fetch("/api/produtos/import", {
+      const r = await fetch("/api/produtos/import?unitId=4", {
         method: "POST",
         body: fd,
       });
@@ -101,7 +101,7 @@ export default function ImportProdutosPage() {
       fd.append("file", file);
       if (delimiter) fd.append("delimiter", delimiter);
 
-      const r = await fetch("/api/produtos/import/preview", {
+      const r = await fetch("/api/produtos/import/preview?unitId=4", {
         method: "POST",
         body: fd,
       });
