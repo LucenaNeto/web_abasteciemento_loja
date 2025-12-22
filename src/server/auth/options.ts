@@ -1,72 +1,92 @@
-// src/server/auth/options.ts
-import type { NextAuthOptions } from "next-auth";
-import Credentials from "next-auth/providers/credentials";
-import { z } from "zod";
+import NextAuth, { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { db, schema } from "@/server/db";
 import { eq } from "drizzle-orm";
 
-const credentialsSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
-
 export const authOptions: NextAuthOptions = {
-  session: {
-    strategy: "jwt",
-  },
-  pages: {
-    signIn: "/login", // criaremos essa página já já
-  },
-  secret: process.env.NEXTAUTH_SECRET,
   providers: [
-    Credentials({
+    CredentialsProvider({
       name: "Credentials",
       credentials: {
-        email: { label: "E-mail", type: "text" },
+        email: { label: "E-mail", type: "email" },
         password: { label: "Senha", type: "password" },
       },
-      async authorize(raw) {
-        const parsed = credentialsSchema.safeParse(raw);
-        if (!parsed.success) return null;
-        const { email, password } = parsed.data;
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          return null;
+        }
 
-        const [user] = await db
-          .select()
-          .from(schema.users)
-          .where(eq(schema.users.email, email))
-          .limit(1);
+        try {
+          // 🔎 Busca usuário por e-mail
+          const rows = await db
+            .select()
+            .from(schema.users)
+            .where(eq(schema.users.email, credentials.email))
+            .limit(1);
 
-        if (!user || !user.isActive) return null;
+          const user = rows[0];
 
-        const ok = await bcrypt.compare(password, user.passwordHash);
-        if (!ok) return null;
+          if (!user) {
+            console.log("Auth: usuário não encontrado", credentials.email);
+            return null;
+          }
 
-        // NextAuth espera um objeto "User" simples.
-        return {
-          id: String(user.id),
-          name: user.name,
-          email: user.email,
-          // adicionamos role para RBAC no token
-          role: user.role,
-        } as any;
+          if (!user.isActive) {
+            console.log("Auth: usuário inativo", credentials.email);
+            return null;
+          }
+
+          // 🔐 Confere senha
+          const ok = await bcrypt.compare(
+            credentials.password,
+            user.passwordHash,
+          );
+
+          if (!ok) {
+            console.log("Auth: senha inválida", credentials.email);
+            return null;
+          }
+
+          // ✅ Usuário autenticado – devolve os dados que irão para o token/session
+          return {
+            id: String(user.id),
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          } as any;
+        } catch (err: any) {
+          // 👇 Aqui vamos ver o erro real na Vercel
+          console.error("Auth DB error:", err);
+          // Devolve null para não explodir a página, mas marcar como credenciais inválidas
+          return null;
+        }
       },
     }),
   ],
+
+  pages: {
+    signIn: "/login",
+  },
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = (user as any).id;
         token.role = (user as any).role;
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
-        (session.user as any).id = token.id;
-        (session.user as any).role = token.role;
+      if (token?.sub) {
+        (session.user as any).id = token.sub;
+      }
+      if (token?.role) {
+        (session.user as any).role = token.role as string;
       }
       return session;
     },
   },
 };
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
