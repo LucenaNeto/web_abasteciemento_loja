@@ -1,0 +1,2 @@
+-- placeholder: este arquivo existia no journal e foi removido.
+-- Mantido apenas para o drizzle-kit conseguir rodar o migrate.

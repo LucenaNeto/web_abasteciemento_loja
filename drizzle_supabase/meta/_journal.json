@@ -15,6 +15,27 @@
       "when": 1763588164096,
       "tag": "0001_small_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1766006728533,
+      "tag": "0002_lush_naoko",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1766147239522,
+      "tag": "0003_useful_sersi",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1766148669055,
+      "tag": "0004_complex_luminals",
+      "breakpoints": true
     }
   ]
 }
