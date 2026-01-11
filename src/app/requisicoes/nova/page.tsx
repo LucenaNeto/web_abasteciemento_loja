@@ -1,7 +1,7 @@
-// src/app/requisicoes/nova/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import UnitSelect from "@/components/UnitSelect";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -19,12 +19,7 @@ type ProductRow = {
 
 type ListResp = {
   data: ProductRow[];
-  pagination: {
-    page: number;
-    pageSize: number;
-    total: number;
-    totalPages: number;
-  };
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
 
 type CartItem = {
@@ -41,6 +36,9 @@ export default function NovaRequisicaoPage() {
   const canCreate = role === "store" || role === "admin";
   const router = useRouter();
 
+  // ✅ unidade atual
+  const [unitId, setUnitId] = useState<number | null>(null);
+
   // busca
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -52,20 +50,15 @@ export default function NovaRequisicaoPage() {
   // carrinho
   const [cart, setCart] = useState<Record<number, CartItem>>({});
   const cartArr = useMemo(() => Object.values(cart), [cart]);
-  const totalItens = useMemo(
-    () => cartArr.reduce((s, it) => s + (it.qty || 0), 0),
-    [cartArr],
-  );
+  const totalItens = useMemo(() => cartArr.reduce((s, it) => s + (it.qty || 0), 0), [cartArr]);
 
-  // obs
+  // obs/criticidade
   const [note, setNote] = useState("");
+  const [criticality, setCriticality] = useState<Criticality>("restock");
 
-  // criticidade (restock = Abastecimento por padrão)
-  const [criticality, setCriticality] =
-    useState<Criticality>("restock");
-
-  // envio
   const [saving, setSaving] = useState(false);
+
+  const mustPickUnit = role === "admin" && !unitId;
 
   async function search() {
     setLoading(true);
@@ -77,13 +70,16 @@ export default function NovaRequisicaoPage() {
       usp.set("page", String(page));
       usp.set("pageSize", "10");
 
-      const r = await fetch(`/api/produtos?${usp.toString()}`, {
-        cache: "no-store",
-      });
-      if (!r.ok) throw new Error(await safeText(r));
-      const j: ListResp = await r.json();
-      setRows(j.data);
-      setTotalPages(j.pagination.totalPages);
+      // ✅ força unidade (pra buscar produtos da unidade atual)
+      if (unitId) usp.set("unitId", String(unitId));
+
+      const r = await fetch(`/api/produtos?${usp.toString()}`, { cache: "no-store" });
+      const j = await safeJson(r);
+      if (!r.ok) throw new Error(j?.error || `Falha (HTTP ${r.status})`);
+
+      const data = (j as ListResp);
+      setRows(data.data);
+      setTotalPages(data.pagination.totalPages);
     } catch (e: any) {
       setErr(String(e?.message ?? e));
     } finally {
@@ -92,11 +88,15 @@ export default function NovaRequisicaoPage() {
   }
 
   useEffect(() => {
-    if (status === "authenticated" && canCreate) {
-      search();
-    }
+    if (status !== "authenticated") return;
+    if (!canCreate) return;
+
+    // admin precisa escolher unidade antes
+    if (mustPickUnit) return;
+
+    search();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, canCreate, page]);
+  }, [status, canCreate, page, unitId, mustPickUnit]);
 
   function addToCart(p: ProductRow) {
     setCart((m) => {
@@ -104,13 +104,7 @@ export default function NovaRequisicaoPage() {
       const nextQty = Math.max(1, (cur?.qty ?? 0) + 1);
       return {
         ...m,
-        [p.id]: {
-          productId: p.id,
-          sku: p.sku,
-          name: p.name,
-          unit: p.unit,
-          qty: nextQty,
-        },
+        [p.id]: { productId: p.id, sku: p.sku, name: p.name, unit: p.unit, qty: nextQty },
       };
     });
   }
@@ -120,13 +114,10 @@ export default function NovaRequisicaoPage() {
     setCart((m) => {
       const cur = m[pid];
       if (!cur) return m;
-      const q = Number.isFinite(n) && n > 0 ? n : 0;
+      const qn = Number.isFinite(n) && n > 0 ? n : 0;
       const copy = { ...m };
-      if (q <= 0) {
-        delete copy[pid];
-      } else {
-        copy[pid] = { ...cur, qty: q };
-      }
+      if (qn <= 0) delete copy[pid];
+      else copy[pid] = { ...cur, qty: qn };
       return copy;
     });
   }
@@ -139,36 +130,40 @@ export default function NovaRequisicaoPage() {
     });
   }
 
-  async function submitReq(e: React.FormEvent) {
+  async function submitReq(e: FormEvent) {
     e.preventDefault();
+
+    if (mustPickUnit) {
+      alert("Selecione uma unidade antes de criar a requisição.");
+      return;
+    }
+
     if (cartArr.length === 0) {
       alert("Adicione ao menos 1 item.");
       return;
     }
-    const items = cartArr.map((it) => ({
-      productId: it.productId,
-      requestedQty: it.qty,
-    }));
+
+    const items = cartArr.map((it) => ({ productId: it.productId, requestedQty: it.qty }));
+
     setSaving(true);
     try {
       const r = await fetch("/api/requisicoes", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          unitId: unitId ?? undefined, // ✅ agora envia
           items,
           note: note.trim() || undefined,
-          criticality, // 🔴🟡🟢 enviado para a API
+          criticality,
         }),
       });
+
       const j = await safeJson(r);
       if (!r.ok) throw new Error(j?.error || `Falha (HTTP ${r.status})`);
+
       const id = j?.data?.id ?? j?.id ?? null;
       alert("Requisição criada com sucesso!");
-      if (id) {
-        router.push(`/requisicoes/${id}`);
-      } else {
-        router.push(`/requisicoes`);
-      }
+      router.push(id ? `/requisicoes/${id}` : "/requisicoes");
     } catch (e: any) {
       alert(String(e?.message ?? e));
     } finally {
@@ -177,13 +172,13 @@ export default function NovaRequisicaoPage() {
   }
 
   if (status === "loading") return <div className="p-6">Carregando...</div>;
+
   if (!canCreate) {
     return (
       <main className="min-h-screen bg-gray-50 p-6">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-2xl border bg-white p-6 text-red-600">
-            Sem permissão. Apenas <strong>Loja</strong> ou{" "}
-            <strong>Admin</strong> podem criar requisições.
+            Sem permissão. Apenas <strong>Loja</strong> ou <strong>Admin</strong> podem criar requisições.
           </div>
         </div>
       </main>
@@ -194,18 +189,35 @@ export default function NovaRequisicaoPage() {
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl">
         <div className="mb-4 flex items-center justify-between text-sm">
-          <Link href="/requisicoes" className="underline">
-            ← Voltar
-          </Link>
+          <Link href="/requisicoes" className="underline">← Voltar</Link>
           <span className="text-xs text-gray-500">Nova Requisição</span>
         </div>
 
+        {/* ✅ Unidade */}
+        <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-4">
+          <label className="block text-sm font-medium text-gray-700">Unidade</label>
+          <div className="mt-1 max-w-md">
+            <UnitSelect
+              role={role}
+              value={unitId}
+              onChange={(v) => {
+                setUnitId(v);
+                setPage(1);
+                setCart({});
+              }}
+            />
+          </div>
+
+          {mustPickUnit && (
+            <p className="mt-2 text-sm text-red-600">Selecione uma unidade para continuar.</p>
+          )}
+        </section>
+
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* BUSCA DE PRODUTO */}
+          {/* BUSCA */}
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Buscar produtos
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900">Buscar produtos</h2>
+
             <div className="mt-3 flex gap-2">
               <input
                 className="w-full rounded-xl border px-3 py-2"
@@ -213,10 +225,12 @@ export default function NovaRequisicaoPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && (setPage(1), search())}
+                disabled={mustPickUnit}
               />
               <button
                 onClick={() => (setPage(1), search())}
                 className="rounded-xl border px-4 py-2 hover:bg-gray-50"
+                disabled={mustPickUnit}
               >
                 Buscar
               </button>
@@ -233,29 +247,23 @@ export default function NovaRequisicaoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? (
+                  {mustPickUnit ? (
                     <tr>
-                      <td className="px-3 py-4 text-center" colSpan={4}>
-                        Carregando...
+                      <td className="px-3 py-4 text-center text-gray-500" colSpan={4}>
+                        Selecione uma unidade.
                       </td>
+                    </tr>
+                  ) : loading ? (
+                    <tr>
+                      <td className="px-3 py-4 text-center" colSpan={4}>Carregando...</td>
                     </tr>
                   ) : err ? (
                     <tr>
-                      <td
-                        className="px-3 py-4 text-center text-red-600"
-                        colSpan={4}
-                      >
-                        {err}
-                      </td>
+                      <td className="px-3 py-4 text-center text-red-600" colSpan={4}>{err}</td>
                     </tr>
                   ) : rows.length === 0 ? (
                     <tr>
-                      <td
-                        className="px-3 py-4 text-center text-gray-500"
-                        colSpan={4}
-                      >
-                        Nenhum produto.
-                      </td>
+                      <td className="px-3 py-4 text-center text-gray-500" colSpan={4}>Nenhum produto.</td>
                     </tr>
                   ) : (
                     rows.map((p) => (
@@ -278,22 +286,19 @@ export default function NovaRequisicaoPage() {
               </table>
             </div>
 
-            {/* paginação */}
             <div className="mt-3 flex items-center justify-between text-sm text-gray-600">
-              <span>
-                Página {page} de {totalPages}
-              </span>
+              <span>Página {page} de {totalPages}</span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1 || loading}
+                  disabled={page <= 1 || loading || mustPickUnit}
                   className="rounded-lg border px-3 py-1.5 disabled:opacity-50"
                 >
                   Anterior
                 </button>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages || loading}
+                  disabled={page >= totalPages || loading || mustPickUnit}
                   className="rounded-lg border px-3 py-1.5 disabled:opacity-50"
                 >
                   Próxima
@@ -304,9 +309,7 @@ export default function NovaRequisicaoPage() {
 
           {/* CARRINHO */}
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Carrinho ({totalItens} itens)
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900">Carrinho ({totalItens} itens)</h2>
 
             <div className="mt-3 overflow-x-auto rounded-xl border">
               <table className="min-w-full text-sm">
@@ -321,12 +324,7 @@ export default function NovaRequisicaoPage() {
                 <tbody>
                   {cartArr.length === 0 ? (
                     <tr>
-                      <td
-                        className="px-3 py-4 text-center text-gray-500"
-                        colSpan={4}
-                      >
-                        Carrinho vazio.
-                      </td>
+                      <td className="px-3 py-4 text-center text-gray-500" colSpan={4}>Carrinho vazio.</td>
                     </tr>
                   ) : (
                     cartArr.map((it) => (
@@ -337,11 +335,8 @@ export default function NovaRequisicaoPage() {
                           <input
                             className="w-24 rounded-lg border px-2 py-1.5"
                             inputMode="numeric"
-                            pattern="[0-9]*"
                             value={String(it.qty)}
-                            onChange={(e) =>
-                              setQty(it.productId, e.target.value)
-                            }
+                            onChange={(e) => setQty(it.productId, e.target.value)}
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -360,14 +355,8 @@ export default function NovaRequisicaoPage() {
             </div>
 
             <form onSubmit={submitReq} className="mt-4 space-y-3">
-              {/* Criticidade */}
               <div>
-                <span className="block text-sm font-medium text-gray-700">
-                  Criticidade
-                </span>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  Escolha a situação do revendedor no momento do pedido.
-                </p>
+                <span className="block text-sm font-medium text-gray-700">Criticidade</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -409,13 +398,10 @@ export default function NovaRequisicaoPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Observação (opcional)
-                </label>
+                <label className="block text-sm font-medium text-gray-700">Observação (opcional)</label>
                 <textarea
                   className="mt-1 w-full rounded-xl border px-3 py-2"
                   rows={3}
-                  placeholder="Ex.: priorizar urgentes, separar por setor..."
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                 />
@@ -424,14 +410,12 @@ export default function NovaRequisicaoPage() {
               <div className="flex items-center gap-3">
                 <button
                   type="submit"
-                  disabled={saving || cartArr.length === 0}
+                  disabled={saving || cartArr.length === 0 || mustPickUnit}
                   className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-50"
                 >
                   {saving ? "Enviando..." : "Criar Requisição"}
                 </button>
-                <span className="text-xs text-gray-500">
-                  Itens: {cartArr.length}
-                </span>
+                <span className="text-xs text-gray-500">Itens: {cartArr.length}</span>
               </div>
             </form>
           </section>
@@ -441,17 +425,14 @@ export default function NovaRequisicaoPage() {
   );
 }
 
-async function safeText(r: Response) {
-  try {
-    return await r.text();
-  } catch {
-    return "";
-  }
-}
 async function safeJson(r: Response) {
   try {
-    return await r.json();
+    const ctype = (r.headers.get("content-type") || "").toLowerCase();
+    if (!ctype.includes("application/json")) return null;
+    const txt = await r.text();
+    if (!txt) return null;
+    return JSON.parse(txt);
   } catch {
-    return null as any;
+    return null;
   }
 }

@@ -1,13 +1,22 @@
-// src/app/api/requisicoes/itens/[itemId]/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { eq } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import type { ItemStatus, RequestStatus } from "@/server/db/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+async function userHasUnit(userId: number, unitId: number) {
+  const [row] = await db
+    .select({ ok: sql<number>`1` })
+    .from(schema.userUnits)
+    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.unitId, unitId)))
+    .limit(1);
+
+  return !!row;
+}
 
 // -------- GET /api/requisicoes/itens/:itemId --------
 export async function GET(
@@ -79,8 +88,6 @@ export async function PATCH(
 
   const userId = Number((guard.session.user as any).id);
 
-  // --- INÍCIO DO BLOCO ADICIONADO ---
-  // A chamada da transação agora está envolvida em um try/catch
   let updated;
   try {
     updated = await withTransaction(async (tx) => {
@@ -100,6 +107,16 @@ export async function PATCH(
         .limit(1);
 
       if (!currentReq) throw new ApiError(404, "Requisição não encontrada");
+
+      // ✅ BLOCO DE VALIDAÇÃO DE UNIDADE ADICIONADO AQUI
+      const sessionUser = guard.session.user as any;
+      const role = String(sessionUser?.role ?? "");
+
+      if (role !== "admin") {
+        const allowed = await userHasUnit(userId, currentReq.unitId);
+        if (!allowed) throw new ApiError(403, "Sem acesso a esta unidade.");
+      }
+      // --------------------------------------------------
 
       if (currentReq.status === "completed" || currentReq.status === "cancelled") {
         throw new ApiError(400, "Requisição já finalizada; não é possível alterar itens.");
@@ -203,7 +220,6 @@ export async function PATCH(
   }
 
   return NextResponse.json({ data: updated });
-  // --- FIM DO BLOCO ADICIONADO ---
 }
 
 // Utilitário de erro HTTP

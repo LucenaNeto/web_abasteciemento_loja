@@ -1,13 +1,23 @@
-// src/app/api/requisicoes/[id]/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RequestStatus } from "@/server/db/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Helper: Verifica se usuário tem acesso à unidade
+async function userHasUnit(userId: number, unitId: number) {
+  const [row] = await db
+    .select({ ok: sql<number>`1` })
+    .from(schema.userUnits)
+    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.unitId, unitId)))
+    .limit(1);
+
+  return !!row;
+}
 
 // ---------- GET /api/requisicoes/:id ----------
 export async function GET(
@@ -28,6 +38,24 @@ export async function GET(
   const [reqRow] = await db.select().from(schema.requests).where(eq(schema.requests.id, id)).limit(1);
   if (!reqRow) {
     return NextResponse.json({ error: "Requisição não encontrada" }, { status: 404 });
+  }
+
+  // ✅ Validação de acesso à unidade (GET)
+  const sessionUser = guard.session.user as any;
+  const role = String(sessionUser?.role ?? "");
+  const meId = Number(sessionUser?.id);
+
+  if (role !== "admin") {
+    if (!Number.isFinite(meId)) {
+      return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
+    }
+    if (!reqRow.unitId) {
+      return NextResponse.json({ error: "Requisição sem unidade." }, { status: 400 });
+    }
+    const allowed = await userHasUnit(meId, reqRow.unitId);
+    if (!allowed) {
+      return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
+    }
   }
 
   // itens + produtos
@@ -125,6 +153,17 @@ export async function PATCH(
       if (!reqRow) throw new ApiError(404, "Requisição não encontrada");
       if (reqRow.status === "cancelled")
         throw new ApiError(400, "Requisição cancelada não pode ser alterada");
+
+      // ✅ Validação de acesso à unidade (PATCH)
+      const sessionUser = guard.session.user as any;
+      const role = String(sessionUser?.role ?? "");
+
+      if (role !== "admin") {
+        if (!reqRow.unitId) throw new ApiError(400, "Requisição sem unidade.");
+        if (!userId) throw new ApiError(401, "Sessão inválida.");
+        const allowed = await userHasUnit(userId, reqRow.unitId);
+        if (!allowed) throw new ApiError(403, "Sem acesso a esta unidade.");
+      }
 
       // 2) Carrega itens + produto (para estoque)
       const itemsRows = await tx

@@ -39,11 +39,32 @@ async function userHasUnit(userId: number, unitId: number) {
   return !!row;
 }
 
+async function assertUnitExistsAndActive(unitId: number) {
+  const [u] = await db
+    .select({ id: schema.units.id, isActive: schema.units.isActive })
+    .from(schema.units)
+    .where(eq(schema.units.id, unitId))
+    .limit(1);
+
+  if (!u) return { ok: false as const, error: "Unidade não encontrada." };
+  if (!u.isActive) return { ok: false as const, error: "Unidade inativa." };
+  return { ok: true as const };
+}
+
+function parseBoolParam(v: string | null) {
+  if (v == null) return null;
+  const s = v.trim().toLowerCase();
+  if (s === "true" || s === "1") return true;
+  if (s === "false" || s === "0") return false;
+  return null;
+}
+
 /**
  * GET /api/produtos
  * Query:
- *  - unitId (opcional para admin; obrigatório/auto-resolvido para store/warehouse)
+ *  - unitId (OBRIGATÓRIO para admin; auto-resolvido para store/warehouse)
  *  - q (opcional: busca em sku ou name)
+ *  - active (opcional: true/false)  ✅ agora funciona
  *  - page, pageSize
  */
 export async function GET(req: Request) {
@@ -51,7 +72,10 @@ export async function GET(req: Request) {
   if (!guard.ok) return guard.res;
 
   const { searchParams } = new URL(req.url);
+
   const q = (searchParams.get("q") ?? "").trim();
+  const active = parseBoolParam(searchParams.get("active"));
+
   const unitIdParam = searchParams.get("unitId");
   const unitIdFromQuery = unitIdParam ? Number(unitIdParam) : NaN;
 
@@ -65,8 +89,19 @@ export async function GET(req: Request) {
 
   let unitId: number | null = Number.isFinite(unitIdFromQuery) ? unitIdFromQuery : null;
 
-  // ✅ store/warehouse: força unitId (resolvendo primária)
-  if (role !== "admin") {
+  // ✅ regra nova: admin precisa informar unitId (bloqueia consulta geral)
+  if (role === "admin") {
+    if (!unitId) {
+      return NextResponse.json(
+        { error: "Informe unitId para listar produtos." },
+        { status: 400 },
+      );
+    }
+    if (!Number.isFinite(unitId) || unitId <= 0) {
+      return NextResponse.json({ error: "unitId inválido." }, { status: 400 });
+    }
+  } else {
+    // ✅ store/warehouse: resolve unitId e valida vínculo
     if (!Number.isFinite(meId)) {
       return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
     }
@@ -82,24 +117,31 @@ export async function GET(req: Request) {
     if (!allowed) {
       return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
     }
-  } else {
-    // admin: se veio unitId, valida; se não veio, pode listar geral
-    if (unitIdParam && (!Number.isFinite(unitId as number) || (unitId as number) <= 0)) {
-      return NextResponse.json({ error: "unitId inválido." }, { status: 400 });
-    }
+  }
+
+  // valida unidade existe e está ativa (para qualquer role)
+  const unitCheck = await assertUnitExistsAndActive(unitId);
+  if (!unitCheck.ok) {
+    return NextResponse.json({ error: unitCheck.error }, { status: 400 });
   }
 
   const filters: any[] = [];
+  filters.push(eq(schema.products.unitId, unitId));
 
-  if (unitId) {
-    filters.push(eq(schema.products.unitId, unitId));
+  if (active !== null) {
+    filters.push(eq(schema.products.isActive, active));
   }
 
   if (q) {
-    filters.push(or(ilike(schema.products.sku, `%${q}%`), ilike(schema.products.name, `%${q}%`)));
+    filters.push(
+      or(
+        ilike(schema.products.sku, `%${q}%`),
+        ilike(schema.products.name, `%${q}%`),
+      ),
+    );
   }
 
-  const whereClause = filters.length ? and(...filters) : undefined;
+  const whereClause = and(...filters);
 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)` })
@@ -139,9 +181,9 @@ export async function GET(req: Request) {
  */
 const createSchema = z.object({
   unitId: z.number().int().positive(),
-  sku: z.string().min(1).max(64),
-  name: z.string().min(1).max(255),
-  unit: z.string().min(1).max(10).optional().default("UN"),
+  sku: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(255),
+  unit: z.string().trim().min(1).max(10).optional().default("UN"),
   isActive: z.boolean().optional().default(true),
   stock: z.number().int().min(0).optional().default(0),
 });
@@ -160,15 +202,10 @@ export async function POST(req: Request) {
     );
   }
 
-  // valida unidade existe
-  const [u] = await db
-    .select({ id: schema.units.id })
-    .from(schema.units)
-    .where(eq(schema.units.id, payload.unitId))
-    .limit(1);
-
-  if (!u) {
-    return NextResponse.json({ error: `Unidade ${payload.unitId} não existe.` }, { status: 400 });
+  // valida unidade existe e ativa
+  const unitCheck = await assertUnitExistsAndActive(payload.unitId);
+  if (!unitCheck.ok) {
+    return NextResponse.json({ error: unitCheck.error }, { status: 400 });
   }
 
   // evita duplicar (unitId + sku)

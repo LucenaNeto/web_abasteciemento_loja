@@ -1,6 +1,6 @@
 // src/app/requisicoes/pendentes/page.tsx
 "use client";
-
+import UnitSelect from "@/components/UnitSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -34,6 +34,8 @@ export default function PendentesAlmoxPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
 
+  const [unitId, setUnitId] = useState<number | null>(null);
+
   // dados
   const [rows, setRows] = useState<ReqRow[]>([]);
   const [totalPages, setTotalPages] = useState(1);
@@ -47,11 +49,12 @@ export default function PendentesAlmoxPage() {
   const query = useMemo(() => {
     const usp = new URLSearchParams();
     usp.set("status", "pending");
+    if (unitId != null) usp.set("unitId", String(unitId));
     if (q.trim()) usp.set("q", q.trim());
     usp.set("page", String(page));
     usp.set("pageSize", String(pageSize));
     return usp.toString();
-  }, [q, page, pageSize]);
+  }, [q, page, pageSize, unitId]);
 
   async function load() {
     setLoading(true);
@@ -141,20 +144,42 @@ async function atender(id: number) {
 
         {/* Filtro */}
         <section className="mt-4 rounded-2xl border bg-white p-4">
-          <div className="flex gap-2">
-            <input
-              className="w-full rounded-xl border px-3 py-2"
-              placeholder="Buscar por ID, criador, observação..."
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (setPage(1), load())}
-            />
-            <button
-              onClick={() => (setPage(1), load())}
-              className="rounded-xl border px-4 py-2 hover:bg-gray-50"
-            >
-              Aplicar
-            </button>
+          <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Unidade</label>
+              <div className="mt-1">
+                <UnitSelect
+                  role={(role ?? "warehouse") as any}
+                  value={unitId}
+                  onChange={(v) => {
+                    setUnitId(v);
+                    setPage(1);
+                  }}
+                />
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                Se ficar vazio, usa sua unidade primária (auto).
+              </div>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Buscar</label>
+              <div className="mt-1 flex gap-2">
+                <input
+                  className="w-full rounded-xl border px-3 py-2"
+                  placeholder="Buscar por ID, criador, observação..."
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && setPage(1)}
+                />
+                <button
+                  onClick={() => setPage(1)}
+                  className="rounded-xl border px-4 py-2 hover:bg-gray-50"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 

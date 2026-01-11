@@ -1,6 +1,7 @@
 // src/app/requisicoes/page.tsx
 "use client";
 
+import UnitSelect from "@/components/UnitSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -24,6 +25,9 @@ export default function RequisicoesPage() {
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as "admin" | "store" | "warehouse" | undefined;
 
+  // ✅ unidade (dropdown)
+  const [unitId, setUnitId] = useState<number | null>(null);
+
   // filtros
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<
@@ -45,13 +49,18 @@ export default function RequisicoesPage() {
 
   const query = useMemo(() => {
     const usp = new URLSearchParams();
+
+    // ✅ se tiver unitId selecionado, filtra
+    // (admin pode deixar null para ver geral, se quiser)
+    if (unitId) usp.set("unitId", String(unitId));
+
     if (q.trim()) usp.set("q", q.trim());
     if (statusFilter !== "all") usp.set("status", statusFilter);
     if (createdBy === "me") usp.set("createdBy", "me");
     usp.set("page", String(page));
     usp.set("pageSize", String(pageSize));
     return usp.toString();
-  }, [q, statusFilter, createdBy, page, pageSize]);
+  }, [unitId, q, statusFilter, createdBy, page, pageSize]);
 
   async function load() {
     setLoading(true);
@@ -71,9 +80,15 @@ export default function RequisicoesPage() {
   }
 
   useEffect(() => {
-    if (status === "authenticated") load();
+    if (status !== "authenticated") return;
+
+    // ✅ para store/warehouse, só carrega quando já tiver unitId escolhido
+    // (evita chamar API sem unitId e ficar "geral" indevido)
+    if ((role === "warehouse" || role === "store") && !unitId) return;
+
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, query]);
+  }, [status, role, unitId, query]);
 
   function resetAndReload() {
     setPage(1);
@@ -136,7 +151,22 @@ export default function RequisicoesPage() {
 
         {/* Filtros */}
         <section className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
-          <div className="grid gap-3 sm:grid-cols-5 sm:items-end">
+          <div className="grid gap-3 sm:grid-cols-6 sm:items-end">
+            {/* ✅ Unidade */}
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Unidade</label>
+              <div className="mt-1">
+                <UnitSelect
+                  role={role}
+                  value={unitId}
+                  onChange={(v) => {
+                    setUnitId(v);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            </div>
+
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700">Buscar</label>
               <input
@@ -147,6 +177,7 @@ export default function RequisicoesPage() {
                 onKeyDown={(e) => e.key === "Enter" && resetAndReload()}
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700">Status</label>
               <select
@@ -164,7 +195,20 @@ export default function RequisicoesPage() {
                 <option value="cancelled">Cancelada</option>
               </select>
             </div>
+
             <div>
+              <button
+                onClick={resetAndReload}
+                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+              >
+                Aplicar filtros
+              </button>
+            </div>
+          </div>
+
+          {/* Criadas por */}
+          <div className="mt-3 grid gap-3 sm:grid-cols-6">
+            <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700">Criadas por</label>
               <select
                 className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
@@ -177,14 +221,6 @@ export default function RequisicoesPage() {
                 <option value="all">Todos</option>
                 <option value="me">Somente minhas</option>
               </select>
-            </div>
-            <div>
-              <button
-                onClick={resetAndReload}
-                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
-              >
-                Aplicar filtros
-              </button>
             </div>
           </div>
         </section>
@@ -334,7 +370,6 @@ async function safeText(r: Response) {
 }
 
 async function safeJson(r: Response) {
-  // Robusto p/ respostas sem corpo ou não-JSON (ex.: 204)
   if (r.status === 204 || r.status === 205 || r.status === 304) return null as any;
   const ctype = (r.headers.get("content-type") || "").toLowerCase();
   if (!ctype.includes("application/json")) return null as any;

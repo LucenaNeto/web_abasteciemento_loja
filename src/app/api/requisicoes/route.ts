@@ -23,7 +23,12 @@ async function getPrimaryUnitId(userId: number) {
   const [row] = await db
     .select({ unitId: schema.userUnits.unitId })
     .from(schema.userUnits)
-    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.isPrimary, true)))
+    .where(
+      and(
+        eq(schema.userUnits.userId, userId),
+        eq(schema.userUnits.isPrimary, true),
+      ),
+    )
     .limit(1);
 
   return row?.unitId ?? null;
@@ -37,6 +42,18 @@ async function userHasUnit(userId: number, unitId: number) {
     .limit(1);
 
   return !!row;
+}
+
+async function assertUnitExistsAndActive(unitId: number) {
+  const [u] = await db
+    .select({ id: schema.units.id, isActive: schema.units.isActive })
+    .from(schema.units)
+    .where(eq(schema.units.id, unitId))
+    .limit(1);
+
+  if (!u) return { ok: false as const, error: "Unidade não encontrada." };
+  if (!u.isActive) return { ok: false as const, error: "Unidade inativa." };
+  return { ok: true as const };
 }
 
 /**
@@ -68,7 +85,7 @@ export async function GET(req: Request) {
 
   let unitId: number | null = Number.isFinite(unitIdFromQuery) ? unitIdFromQuery : null;
 
-  // Se não for admin, resolve unidade (primária -> default)
+  // Se não for admin, resolve unidade (primária -> default) e valida acesso
   if (role !== "admin") {
     if (!Number.isFinite(meId)) {
       return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
@@ -137,7 +154,8 @@ export async function GET(req: Request) {
  * POST /api/requisicoes
  */
 const createSchema = z.object({
-  unitId: z.number().int().positive().optional(), // ✅ novo
+  // ✅ aceita null também (mais robusto caso o front mande null por acidente)
+  unitId: z.number().int().positive().nullable().optional(),
   note: z.string().max(500).optional().default(""),
   criticality: z.enum(["cashier", "service", "restock"]).default("restock"),
   items: z
@@ -166,7 +184,10 @@ export async function POST(req: Request) {
 
   const ids = payload.items.map((i) => i.productId);
   if (new Set(ids).size !== ids.length) {
-    return NextResponse.json({ error: "Itens duplicados: remova produtos repetidos." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Itens duplicados: remova produtos repetidos." },
+      { status: 400 },
+    );
   }
 
   // userId seguro
@@ -199,15 +220,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Usuário da sessão não encontrado no banco." }, { status: 401 });
   }
 
-  // ✅ resolve unitId (body -> primary -> default)
+  // ✅ resolve unitId
+  // - admin: EXIGE unitId no body (evita cair na 00000 sem querer)
+  // - store: body -> primary -> default
   let unitId: number | null = payload.unitId ?? null;
-  if (!unitId) unitId = await getPrimaryUnitId(userId);
-  if (!unitId) unitId = await getDefaultUnitId();
+
+  if (role === "admin") {
+    if (!unitId) {
+      return NextResponse.json(
+        { error: "Informe unitId para criar a requisição." },
+        { status: 400 },
+      );
+    }
+  } else {
+    if (!unitId) unitId = await getPrimaryUnitId(userId);
+    if (!unitId) unitId = await getDefaultUnitId();
+  }
 
   if (!unitId) {
     return NextResponse.json({ error: "Unidade não definida." }, { status: 400 });
   }
 
+  // valida unidade existe e ativa
+  const unitCheck = await assertUnitExistsAndActive(unitId);
+  if (!unitCheck.ok) {
+    return NextResponse.json({ error: unitCheck.error }, { status: 400 });
+  }
+
+  // store precisa ter vínculo com a unidade
   if (role !== "admin") {
     const allowed = await userHasUnit(userId, unitId);
     if (!allowed) return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
@@ -234,7 +274,7 @@ export async function POST(req: Request) {
     const res = await tx
       .insert(schema.requests)
       .values({
-        unitId, // ✅ FIX do 500 (NOT NULL)
+        unitId,
         createdByUserId: userId,
         assignedToUserId: null,
         status: "pending",
@@ -261,7 +301,13 @@ export async function POST(req: Request) {
       recordId: String(requestId),
       userId,
       payload: JSON.stringify({
-        after: { requestId, unitId, note: payload.note, criticality: payload.criticality, items: payload.items },
+        after: {
+          requestId,
+          unitId,
+          note: payload.note,
+          criticality: payload.criticality,
+          items: payload.items,
+        },
       }),
     });
 

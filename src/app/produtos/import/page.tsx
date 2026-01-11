@@ -1,16 +1,10 @@
 // src/app/produtos/import/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import UnitSelect from "@/components/UnitSelect";
+import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-
-type Summary = {
-  inserted: number;
-  updated: number;
-  skipped: number;
-  errors: { line: number; error: string }[];
-};
 
 type PreviewResp = {
   type: "csv" | "excel";
@@ -38,6 +32,10 @@ export default function ImportProdutosPage() {
   const [resp, setResp] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // ✅ unidade selecionada (obrigatória no import)
+  const [unitId, setUnitId] = useState<number | null>(null);
+  const mustPickUnit = isAdmin && !unitId;
+
   // preview
   const [pLoading, setPLoading] = useState(false);
   const [pErr, setPErr] = useState<string | null>(null);
@@ -49,7 +47,7 @@ export default function ImportProdutosPage() {
     return `/api/produtos/import/template?delimiter=${encodeURIComponent(d)}`;
   }, [delimiter]);
 
-  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+  function onPick(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
     setResp(null);
@@ -58,22 +56,39 @@ export default function ImportProdutosPage() {
     setPErr(null);
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  function buildUrl(path: string) {
+    const usp = new URLSearchParams();
+    if (unitId) usp.set("unitId", String(unitId));
+    return `${path}?${usp.toString()}`;
+  }
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
+
+    if (!isAdmin) return;
+
+  
     if (!file) {
       setErr("Selecione um arquivo CSV ou Excel.");
       return;
     }
+
+    if (!unitId) {
+      setErr("Selecione uma unidade para importar os produtos.");
+      return;
+    }
+
     setLoading(true);
     setErr(null);
     setResp(null);
+
     try {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("mode", mode);
       if (delimiter) fd.append("delimiter", delimiter);
 
-      const r = await fetch("/api/produtos/import?unitId=4", {
+      const r = await fetch(buildUrl("/api/produtos/import"), {
         method: "POST",
         body: fd,
       });
@@ -89,22 +104,33 @@ export default function ImportProdutosPage() {
   }
 
   async function onPreview() {
+    if (!isAdmin) return;
+
+    
     if (!file) {
       setPErr("Selecione um arquivo para simular.");
       return;
     }
+
+    if (!unitId) {
+      setPErr("Selecione uma unidade para simular a importação.");
+      return;
+    }
+
     setPLoading(true);
     setPErr(null);
     setPResp(null);
+
     try {
       const fd = new FormData();
       fd.append("file", file);
       if (delimiter) fd.append("delimiter", delimiter);
 
-      const r = await fetch("/api/produtos/import/preview?unitId=4", {
+      const r = await fetch(buildUrl("/api/produtos/import/preview"), {
         method: "POST",
         body: fd,
       });
+
       const json = await safeJson(r);
       if (!r.ok) throw new Error(json?.error || `Falha (HTTP ${r.status})`);
       setPResp(json as PreviewResp);
@@ -116,6 +142,7 @@ export default function ImportProdutosPage() {
   }
 
   if (status === "loading") return <div className="p-6">Carregando...</div>;
+
   if (!isAdmin) {
     return (
       <main className="min-h-screen bg-gray-50 p-6">
@@ -132,7 +159,9 @@ export default function ImportProdutosPage() {
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-3xl">
         <div className="mb-4 text-sm">
-          <Link href="/produtos" className="underline">← Voltar para Produtos</Link>
+          <Link href="/produtos" className="underline">
+            ← Voltar para Produtos
+          </Link>
         </div>
 
         <h1 className="text-2xl font-semibold text-gray-900">Importar Produtos (CSV/Excel)</h1>
@@ -168,6 +197,29 @@ export default function ImportProdutosPage() {
         </div>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4 rounded-2xl border bg-white p-6">
+          {/* ✅ Unidade destino */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Unidade destino</label>
+            <div className="mt-1">
+              <UnitSelect
+                role={role}
+                value={unitId}
+                onChange={(v) => {
+                  setUnitId(v);
+                  setResp(null);
+                  setErr(null);
+                  setPResp(null);
+                  setPErr(null);
+                }}
+              />
+            </div>
+            {mustPickUnit && (
+              <div className="mt-2 text-xs text-red-600">
+                Selecione uma unidade para importar/simular.
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700">Arquivo</label>
             <input
@@ -221,20 +273,22 @@ export default function ImportProdutosPage() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"
-              disabled={loading || !file}
+              disabled={loading || !file || mustPickUnit}
               className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-50"
             >
               {loading ? "Importando..." : "Importar"}
             </button>
+
             <button
               type="button"
               onClick={onPreview}
-              disabled={pLoading || !file}
+              disabled={pLoading || !file || mustPickUnit}
               className="rounded-xl border px-4 py-2 hover:bg-gray-50 disabled:opacity-50"
               title="Simula o processamento sem gravar nada no banco"
             >
               {pLoading ? "Simulando..." : "Simular"}
             </button>
+
             <span className="text-xs text-gray-500">A sessão do admin é usada automaticamente.</span>
           </div>
         </form>
@@ -244,8 +298,14 @@ export default function ImportProdutosPage() {
           <section className="mt-6 rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-semibold text-gray-900">Preview (não grava no banco)</h2>
             <div className="mt-2 text-sm text-gray-700">
-              <div>Tipo: <code>{pResp.type}</code></div>
-              {pResp.delimiter && <div>Delimitador: <code>{pResp.delimiter}</code></div>}
+              <div>
+                Tipo: <code>{pResp.type}</code>
+              </div>
+              {pResp.delimiter && (
+                <div>
+                  Delimitador: <code>{pResp.delimiter}</code>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-5 text-sm">
@@ -308,9 +368,17 @@ export default function ImportProdutosPage() {
           <section className="mt-6 rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-semibold text-gray-900">Resultado</h2>
             <div className="mt-2 text-sm text-gray-700">
-              <div>Tipo: <code>{resp.type ?? "csv"}</code></div>
-              {resp.delimiter && <div>Delimitador: <code>{resp.delimiter}</code></div>}
-              <div>Modo: <code>{resp.mode}</code></div>
+              <div>
+                Tipo: <code>{resp.type ?? "csv"}</code>
+              </div>
+              {resp.delimiter && (
+                <div>
+                  Delimitador: <code>{resp.delimiter}</code>
+                </div>
+              )}
+              <div>
+                Modo: <code>{resp.mode}</code>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-3">

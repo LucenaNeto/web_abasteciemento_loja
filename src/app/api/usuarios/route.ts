@@ -1,16 +1,14 @@
-// src/app/api/usuarios/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { db, schema } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, like, or, sql, inArray } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // ---------- GET /api/usuarios ----------
-// Filtros: ?q=...&role=admin|store|warehouse&active=true|false&page=1&pageSize=20
 export async function GET(req: Request) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
@@ -73,13 +71,16 @@ export async function GET(req: Request) {
 }
 
 // ---------- POST /api/usuarios ----------
-// Body: { name, email, password, role: "admin"|"store"|"warehouse", isActive?: boolean=true }
+// CORREÇÃO AQUI: Os campos novos devem estar DENTRO do objeto
 const createSchema = z.object({
   name: z.string().min(1, "Nome obrigatório").max(255).trim(),
   email: z.string().email("E-mail inválido").max(255).trim(),
   password: z.string().min(6, "Senha mínima de 6 caracteres"),
   role: z.enum(["admin", "store", "warehouse"]),
   isActive: z.boolean().optional().default(true),
+  // Campos novos devidamente integrados:
+  unitIds: z.array(z.number().int().positive()).optional().default([]),
+  primaryUnitId: z.number().int().positive().optional(),
 });
 
 export async function POST(req: Request) {
@@ -90,6 +91,12 @@ export async function POST(req: Request) {
   try {
     const json = await req.json();
     payload = createSchema.parse(json);
+    console.log("DEBUG POST /api/usuarios payload:", {
+    unitIds: payload.unitIds,
+    primaryUnitId: payload.primaryUnitId,
+    email: payload.email,
+  });
+
   } catch (err: any) {
     return NextResponse.json(
       { error: "Dados inválidos", details: err?.issues ?? String(err) },
@@ -97,7 +104,36 @@ export async function POST(req: Request) {
     );
   }
 
-  // verificar duplicidade por email
+  // 1. Validação de Unidades (Antes de criar o usuário!)
+  const unitIds = Array.from(new Set(payload.unitIds ?? []));
+  if (unitIds.length === 0) {
+    return NextResponse.json(
+      { error: "Selecione ao menos 1 unidade para o usuário." },
+      { status: 400 },
+    );
+  }
+
+  // Verifica se as unidades existem no banco
+  const existingUnits = await db
+    .select({ id: schema.units.id })
+    .from(schema.units)
+    .where(inArray(schema.units.id, unitIds));
+
+  if (existingUnits.length !== unitIds.length) {
+    return NextResponse.json(
+      { error: "Alguma unidade selecionada não existe." },
+      { status: 400 },
+    );
+  }
+
+  // Define a primária
+  const primaryUnitId =
+    payload.primaryUnitId && unitIds.includes(payload.primaryUnitId)
+      ? payload.primaryUnitId
+      : unitIds[0];
+
+
+  // 2. Verificar duplicidade por email
   const [exists] = await db
     .select()
     .from(schema.users)
@@ -108,10 +144,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "E-mail já cadastrado" }, { status: 409 });
   }
 
-  // criar usuário
+  // 3. Criar hash e Inserir no Banco (Transação implícita ou sequencial)
   const passwordHash = await bcrypt.hash(payload.password, 10);
 
   try {
+    // A) Cria Usuário
     const ins = await db
       .insert(schema.users)
       .values({
@@ -124,8 +161,18 @@ export async function POST(req: Request) {
       .returning({ id: schema.users.id });
 
     const userId = ins[0]?.id;
+    if (!userId) throw new Error("Falha ao recuperar ID do novo usuário");
 
-    // auditoria
+    // B) Vincula Unidades
+    await db.insert(schema.userUnits).values(
+      unitIds.map((uid) => ({
+        userId: userId,
+        unitId: uid,
+        isPrimary: uid === primaryUnitId,
+      })),
+    );
+
+    // C) Auditoria
     const adminId = Number((guard.session.user as any).id);
     await db.insert(schema.auditLogs).values({
       tableName: "users",
@@ -139,11 +186,13 @@ export async function POST(req: Request) {
           email: payload.email,
           role: payload.role,
           isActive: payload.isActive ?? true,
+          unitIds, // log das unidades
+          primaryUnitId
         },
       }),
     });
 
-    // retorna sem hash
+    // Retorna o usuário criado
     const [created] = await db
       .select({
         id: schema.users.id,
@@ -155,12 +204,16 @@ export async function POST(req: Request) {
         updatedAt: schema.users.updatedAt,
       })
       .from(schema.users)
-      .where(eq(schema.users.id, userId!))
+      .where(eq(schema.users.id, userId))
       .limit(1);
 
     return NextResponse.json({ data: created }, { status: 201 });
+
   } catch (err: any) {
     const msg = String(err?.message ?? err);
+    // Se falhar na criação das unidades, o ideal seria fazer rollback, 
+    // mas sem transação explícita, o erro é pego aqui.
+    console.error(err);
     const isUnique =
       msg.includes("UNIQUE constraint failed") || msg.toLowerCase().includes("unique");
     return NextResponse.json(

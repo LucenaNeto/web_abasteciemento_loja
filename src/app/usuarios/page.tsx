@@ -1,10 +1,13 @@
-// src/app/usuarios/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+// Em produção, descomente a linha abaixo e remova o mock de useSession
 import { useSession } from "next-auth/react";
 
+
+
 type Role = "admin" | "store" | "warehouse";
+
 type Row = {
   id: number;
   name: string;
@@ -13,6 +16,17 @@ type Row = {
   isActive: boolean | 0 | 1;
   createdAt: string;
   updatedAt: string;
+};
+
+type UnitRow = {
+  id: number;
+  code: string;
+  name: string;
+  isActive: boolean | 0 | 1;
+};
+
+type UserUnitsResp = {
+  data: { userId: number; unitIds: number[]; primaryUnitId: number | null };
 };
 
 type ListResp = {
@@ -24,6 +38,31 @@ export default function UsuariosPage() {
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as Role | undefined;
   const isAdmin = role === "admin";
+
+  // ---- unidades (para atribuição no modal) ----
+  const [units, setUnits] = useState<UnitRow[]>([]);
+  const [unitsLoading, setUnitsLoading] = useState(false);
+  const [unitsErr, setUnitsErr] = useState<string | null>(null);
+
+  async function loadUnits() {
+    setUnitsLoading(true);
+    setUnitsErr(null);
+    try {
+      const r = await fetch("/api/units?active=true", { cache: "no-store" });
+      const j = await safeJson(r);
+      if (!r.ok) throw new Error(j?.error || `Falha (HTTP ${r.status})`);
+      setUnits((j?.data ?? []) as UnitRow[]);
+    } catch (e: any) {
+      setUnitsErr(String(e?.message ?? e));
+    } finally {
+      setUnitsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (status === "authenticated" && isAdmin) loadUnits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, isAdmin]);
 
   // filtros
   const [q, setQ] = useState("");
@@ -46,6 +85,11 @@ export default function UsuariosPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState<Role>("store");
   const [newActive, setNewActive] = useState(true);
+
+  // unidades do novo
+  const [newUnitIds, setNewUnitIds] = useState<number[]>([]);
+  const [newPrimaryUnitId, setNewPrimaryUnitId] = useState<number | null>(null);
+
   const [savingNew, setSavingNew] = useState(false);
   const [newErr, setNewErr] = useState<string | null>(null);
 
@@ -55,6 +99,12 @@ export default function UsuariosPage() {
   const [editRole, setEditRole] = useState<Role>("store");
   const [editActive, setEditActive] = useState(true);
   const [editNewPassword, setEditNewPassword] = useState("");
+
+  // unidades do editar
+  const [editUnitIds, setEditUnitIds] = useState<number[]>([]);
+  const [editPrimaryUnitId, setEditPrimaryUnitId] = useState<number | null>(null);
+  const [loadingEditUnits, setLoadingEditUnits] = useState(false);
+
   const [savingEdit, setSavingEdit] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
 
@@ -94,15 +144,102 @@ export default function UsuariosPage() {
     setPage(1);
   }
 
-  // criar
+  // ---- helpers unidade (novo) ----
+  function toggleNewUnit(uid: number) {
+    setNewUnitIds((prev) => {
+      const has = prev.includes(uid);
+      const next = has ? prev.filter((x) => x !== uid) : [...prev, uid];
+      // ajusta primária
+      if (!has) {
+        if (!newPrimaryUnitId) setNewPrimaryUnitId(uid);
+      } else {
+        if (newPrimaryUnitId === uid) setNewPrimaryUnitId(next[0] ?? null);
+      }
+      return next;
+    });
+  }
+
+  // ---- helpers unidade (editar) ----
+  function toggleEditUnit(uid: number) {
+    setEditUnitIds((prev) => {
+      const has = prev.includes(uid);
+      const next = has ? prev.filter((x) => x !== uid) : [...prev, uid];
+      if (!has) {
+        if (!editPrimaryUnitId) setEditPrimaryUnitId(uid);
+      } else {
+        if (editPrimaryUnitId === uid) setEditPrimaryUnitId(next[0] ?? null);
+      }
+      return next;
+    });
+  }
+
+  async function saveUserUnits(userId: number, unitIds: number[], primaryUnitId: number | null) {
+    const r = await fetch(`/api/usuarios/${userId}/units`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unitIds, primaryUnitId }),
+    });
+    const j = await safeJson(r);
+    if (!r.ok) throw new Error(j?.error || `Falha ao salvar unidades (HTTP ${r.status})`);
+  }
+
+  async function loadUserUnits(userId: number) {
+    setLoadingEditUnits(true);
+    try {
+      const r = await fetch(`/api/usuarios/${userId}/units`, { cache: "no-store" });
+      const j = (await safeJson(r)) as UserUnitsResp | null;
+      if (!r.ok) throw new Error((j as any)?.error || `Falha (HTTP ${r.status})`);
+
+      const unitIds = j?.data?.unitIds ?? [];
+      const primaryUnitId = j?.data?.primaryUnitId ?? null;
+
+      setEditUnitIds(unitIds);
+      setEditPrimaryUnitId(primaryUnitId && unitIds.includes(primaryUnitId) ? primaryUnitId : unitIds[0] ?? null);
+    } catch (e: any) {
+      // se falhar, não trava o modal, só mostra no erro do modal
+      setEditErr(String(e?.message ?? e));
+      setEditUnitIds([]);
+      setEditPrimaryUnitId(null);
+    } finally {
+      setLoadingEditUnits(false);
+    }
+  }
+
+  // ✅ CRIAR USUÁRIO ATUALIZADO
   async function createUser() {
     if (!isAdmin) return;
+
     setNewErr(null);
+
     if (!newName.trim() || !newEmail.trim() || !newPassword.trim()) {
       setNewErr("Preencha nome, e-mail e senha.");
       return;
     }
+
+    // ✅ GARANTE que é array de números
+    const unitIds = (newUnitIds ?? [])
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    if (unitIds.length === 0) {
+      setNewErr("Selecione ao menos 1 unidade para o usuário.");
+      return;
+    }
+
+    const primaryUnitId =
+      newPrimaryUnitId && unitIds.includes(Number(newPrimaryUnitId))
+        ? Number(newPrimaryUnitId)
+        : unitIds[0];
+
     setSavingNew(true);
+
+    console.log("DEBUG createUser:", {
+    newUnitIds,
+    unitIdsCalculado: unitIds,
+    newPrimaryUnitId,
+    primaryUnitId,
+  });
+
     try {
       const resp = await fetch("/api/usuarios", {
         method: "POST",
@@ -113,16 +250,27 @@ export default function UsuariosPage() {
           password: newPassword,
           role: newRole,
           isActive: newActive,
+
+          // ✅ ISSO aqui é o que normalmente está faltando:
+          unitIds,
+          primaryUnitId,
         }),
       });
+
       const j = await safeJson(resp);
       if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
+
       setOpenNew(false);
       setNewName("");
       setNewEmail("");
       setNewPassword("");
       setNewRole("store");
       setNewActive(true);
+
+      // ✅ reset unidades do modal
+      setNewUnitIds([]);
+      setNewPrimaryUnitId(null);
+
       resetAndReload();
       await load();
     } catch (e: any) {
@@ -140,13 +288,23 @@ export default function UsuariosPage() {
     setEditActive(truthy(r.isActive));
     setEditNewPassword("");
     setEditErr(null);
+
+    // carrega unidades do usuário
+    loadUserUnits(r.id);
   }
 
   // salvar edição
   async function saveEdit() {
     if (!isAdmin || !openEdit) return;
     setEditErr(null);
+
+    if (editUnitIds.length === 0) {
+      setEditErr("Selecione ao menos 1 unidade para este usuário.");
+      return;
+    }
+
     setSavingEdit(true);
+
     try {
       const body: any = {
         name: editName.trim() || undefined,
@@ -162,6 +320,14 @@ export default function UsuariosPage() {
       });
       const j = await safeJson(resp);
       if (!resp.ok) throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
+
+      // salva unidades também
+      await saveUserUnits(
+        openEdit.id,
+        editUnitIds,
+        editPrimaryUnitId && editUnitIds.includes(editPrimaryUnitId) ? editPrimaryUnitId : editUnitIds[0] ?? null,
+      );
+
       setOpenEdit(null);
       resetAndReload();
       await load();
@@ -193,15 +359,28 @@ export default function UsuariosPage() {
         <header className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Usuários</h1>
-            <p className="text-sm text-gray-500">Gerencie acesso: nome, papel, status e senha.</p>
+            <p className="text-sm text-gray-500">Gerencie acesso: nome, papel, status, senha e unidades.</p>
           </div>
           <button
-            onClick={() => setOpenNew(true)}
+            onClick={() => {
+              setOpenNew(true);
+              setNewErr(null);
+              // reset unidades do novo
+              setNewUnitIds([]);
+              setNewPrimaryUnitId(null);
+              if (units.length === 0) loadUnits();
+            }}
             className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
           >
             Novo Usuário
           </button>
         </header>
+
+        {unitsErr && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Falha ao carregar unidades: {unitsErr}
+          </div>
+        )}
 
         {/* Filtros */}
         <section className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
@@ -345,7 +524,7 @@ export default function UsuariosPage() {
       {/* Modal Novo Usuário */}
       {openNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Novo Usuário</h3>
               <button onClick={() => setOpenNew(false)} className="text-gray-500 hover:text-gray-700">
@@ -362,53 +541,104 @@ export default function UsuariosPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-gray-700">Nome</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                />
+                <input className="mt-1 w-full rounded-xl border px-3 py-2" value={newName} onChange={(e) => setNewName(e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">E-mail</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                />
+                <input className="mt-1 w-full rounded-xl border px-3 py-2" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Senha</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
+                <input className="mt-1 w-full rounded-xl border px-3 py-2" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Papel</label>
-                <select
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as Role)}
-                >
+                <select className="mt-1 w-full rounded-xl border px-3 py-2" value={newRole} onChange={(e) => setNewRole(e.target.value as Role)}>
                   <option value="store">Loja</option>
                   <option value="warehouse">Almoxarifado</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>
+
               <div className="sm:col-span-2 flex items-center gap-2">
-                <input
-                  id="new-active"
-                  type="checkbox"
-                  checked={newActive}
-                  onChange={(e) => setNewActive(e.target.checked)}
-                />
-                <label htmlFor="new-active" className="text-sm text-gray-700">
-                  Ativo
-                </label>
+                <input id="new-active" type="checkbox" checked={newActive} onChange={(e) => setNewActive(e.target.checked)} />
+                <label htmlFor="new-active" className="text-sm text-gray-700">Ativo</label>
               </div>
+            </div>
+
+            {/* Unidades */}
+            <div className="mt-5 rounded-xl border p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">Unidades permitidas</div>
+                  <div className="text-xs text-gray-500">
+                    Marque as unidades que esse colaborador pode visualizar. Escolha também a primária.
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50"
+                    onClick={() => {
+                      const ids = units.map((u) => u.id);
+                      setNewUnitIds(ids);
+                      setNewPrimaryUnitId(ids[0] ?? null);
+                    }}
+                  >
+                    Selecionar todas
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50"
+                    onClick={() => {
+                      setNewUnitIds([]);
+                      setNewPrimaryUnitId(null);
+                    }}
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 max-h-48 overflow-auto rounded-lg border">
+                {units.length === 0 ? (
+                  <div className="p-3 text-sm text-gray-500">Sem unidades carregadas.</div>
+                ) : (
+                  <ul className="divide-y">
+                    {units.map((u) => {
+                      const checked = newUnitIds.includes(u.id);
+                      const isPrimary = newPrimaryUnitId === u.id;
+                      return (
+                        <li key={u.id} className="flex items-center justify-between gap-3 p-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={checked} onChange={() => toggleNewUnit(u.id)} />
+                            <span className="text-sm text-gray-800">
+                              <strong>{u.code}</strong> — {u.name}
+                            </span>
+                          </label>
+
+                          <label className={`flex items-center gap-2 text-sm ${checked ? 'text-gray-700 cursor-pointer' : 'text-gray-300'}`}>
+                            <input
+                              type="radio"
+                              name="new-primary"
+                              checked={isPrimary}
+                              disabled={!checked}
+                              onChange={() => setNewPrimaryUnitId(u.id)}
+                            />
+                            Primária
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              {newUnitIds.length === 0 && (
+                <div className="mt-2 text-xs text-amber-700">
+                  Dica: se o usuário for Loja/Almoxarifado e não tiver unidade, ele pode ficar sem acesso.
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
@@ -430,7 +660,7 @@ export default function UsuariosPage() {
       {/* Modal Editar Usuário */}
       {openEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Editar Usuário #{openEdit.id}</h3>
               <button onClick={() => setOpenEdit(null)} className="text-gray-500 hover:text-gray-700">
@@ -447,34 +677,19 @@ export default function UsuariosPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">Nome</label>
-                <input
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
+                <input className="mt-1 w-full rounded-xl border px-3 py-2" value={editName} onChange={(e) => setEditName(e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Papel</label>
-                <select
-                  className="mt-1 w-full rounded-xl border px-3 py-2"
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value as Role)}
-                >
+                <select className="mt-1 w-full rounded-xl border px-3 py-2" value={editRole} onChange={(e) => setEditRole(e.target.value as Role)}>
                   <option value="store">Loja</option>
                   <option value="warehouse">Almoxarifado</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  id="edit-active"
-                  type="checkbox"
-                  checked={editActive}
-                  onChange={(e) => setEditActive(e.target.checked)}
-                />
-                <label htmlFor="edit-active" className="text-sm text-gray-700">
-                  Ativo
-                </label>
+                <input id="edit-active" type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} />
+                <label htmlFor="edit-active" className="text-sm text-gray-700">Ativo</label>
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">Nova senha (opcional)</label>
@@ -485,6 +700,48 @@ export default function UsuariosPage() {
                   onChange={(e) => setEditNewPassword(e.target.value)}
                   placeholder="deixe em branco para não alterar"
                 />
+              </div>
+            </div>
+
+            {/* Unidades */}
+            <div className="mt-5 rounded-xl border p-4">
+              <div className="text-sm font-medium text-gray-900">Unidades permitidas</div>
+              <div className="text-xs text-gray-500">Defina quais unidades ele pode ver e a unidade primária.</div>
+
+              <div className="mt-3 max-h-48 overflow-auto rounded-lg border">
+                {loadingEditUnits ? (
+                  <div className="p-3 text-sm text-gray-500">Carregando unidades do usuário...</div>
+                ) : units.length === 0 ? (
+                  <div className="p-3 text-sm text-gray-500">Sem unidades carregadas.</div>
+                ) : (
+                  <ul className="divide-y">
+                    {units.map((u) => {
+                      const checked = editUnitIds.includes(u.id);
+                      const isPrimary = editPrimaryUnitId === u.id;
+                      return (
+                        <li key={u.id} className="flex items-center justify-between gap-3 p-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={checked} onChange={() => toggleEditUnit(u.id)} />
+                            <span className="text-sm text-gray-800">
+                              <strong>{u.code}</strong> — {u.name}
+                            </span>
+                          </label>
+
+                          <label className={`flex items-center gap-2 text-sm ${checked ? 'text-gray-700 cursor-pointer' : 'text-gray-300'}`}>
+                            <input
+                              type="radio"
+                              name="edit-primary"
+                              checked={isPrimary}
+                              disabled={!checked}
+                              onChange={() => setEditPrimaryUnitId(u.id)}
+                            />
+                            Primária
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             </div>
 

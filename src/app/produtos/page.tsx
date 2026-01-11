@@ -1,21 +1,27 @@
 // src/app/produtos/page.tsx
 "use client";
 
+import UnitSelect from "@/components/UnitSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 
-type Product = {
+type Role = "admin" | "store" | "warehouse";
+
+type ProductRow = {
   id: number;
+  unitId?: number;
   sku: string;
   name: string;
-  unit: string;
-  isActive: 0 | 1 | boolean;
-  createdAt: string;
-  updatedAt: string;
+  unit: string | null;
+  isActive: boolean | 0 | 1;
+  stock?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
-type ApiListResp = {
-  data: Product[];
+type ListResp = {
+  data: ProductRow[];
   pagination: {
     page: number;
     pageSize: number;
@@ -26,105 +32,87 @@ type ApiListResp = {
 
 export default function ProdutosPage() {
   const { data: session, status } = useSession();
-  const role = (session?.user as any)?.role as "admin" | "store" | "warehouse" | undefined;
-
-  const [q, setQ] = useState("");
-  const [active, setActive] = useState<"all" | "true" | "false">("all");
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
-
-  const [rows, setRows] = useState<Product[]>([]);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
-
-  // Modal de criação
-  const [openNew, setOpenNew] = useState(false);
-  const [newSku, setNewSku] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newUnit, setNewUnit] = useState("UN");
-  const [newSaving, setNewSaving] = useState(false);
-  const [newErr, setNewErr] = useState<string | null>(null);
+  const role = (session?.user as any)?.role as Role | undefined;
 
   const isAdmin = role === "admin";
 
-  const queryParams = useMemo(() => {
+  // ✅ unidade (dropdown)
+  const [unitId, setUnitId] = useState<number | null>(null);
+
+  // filtros
+  const [q, setQ] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+
+  // dados
+  const [rows, setRows] = useState<ProductRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // store/warehouse precisam de unitId (admin pode deixar null = todas)
+  const mustPickUnit = (role === "store" || role === "warehouse") && !unitId;
+
+  const query = useMemo(() => {
     const usp = new URLSearchParams();
+
+    // ✅ unitId (admin pode omitir para listar geral)
+    if (unitId) usp.set("unitId", String(unitId));
+
     if (q.trim()) usp.set("q", q.trim());
-    if (active !== "all") usp.set("active", active);
+    if (activeFilter !== "all") usp.set("active", activeFilter);
+
     usp.set("page", String(page));
     usp.set("pageSize", String(pageSize));
+
     return usp.toString();
-  }, [q, active, page, pageSize]);
+  }, [unitId, q, activeFilter, page, pageSize]);
 
   async function load() {
     setLoading(true);
-    setLoadErr(null);
+    setErr(null);
     try {
-      const resp = await fetch(`/api/produtos?${queryParams}`, { cache: "no-store" });
+      const resp = await fetch(`/api/produtos?${query}`, { cache: "no-store" });
+
       if (!resp.ok) {
-        const t = await safeText(resp);
-        throw new Error(t || `Falha ao listar (HTTP ${resp.status})`);
+        const j = await safeJson(resp);
+        const msg =
+          j?.error ||
+          j?.message ||
+          (typeof j === "string" ? j : null) ||
+          (await safeText(resp)) ||
+          `Falha (HTTP ${resp.status})`;
+        throw new Error(String(msg));
       }
-      const json: ApiListResp = await resp.json();
-      setRows(json.data);
-      setTotalPages(json.pagination.totalPages);
-      setTotal(json.pagination.total);
+
+      const json: ListResp = await resp.json();
+      setRows(json.data || []);
+      setTotal(json.pagination?.total ?? 0);
+      setTotalPages(json.pagination?.totalPages ?? 1);
     } catch (e: any) {
-      setLoadErr(String(e?.message ?? e));
+      setErr(e?.message || "Falha ao carregar");
+      setRows([]);
+      setTotal(0);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (status === "authenticated") {
-      load();
-    }
+    if (status !== "authenticated") return;
+    if (mustPickUnit) return; // store/warehouse só carrega quando tiver unitId
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, queryParams]);
+  }, [status, role, unitId, query, mustPickUnit]);
 
   function resetAndReload() {
     setPage(1);
-    // useEffect recarrega devido ao queryParams
   }
 
-  async function createProduct() {
-    setNewErr(null);
-    if (!newSku.trim() || !newName.trim()) {
-      setNewErr("Preencha SKU e Nome.");
-      return;
-    }
-    setNewSaving(true);
-    try {
-      const resp = await fetch("/api/produtos", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sku: newSku.trim(),
-          name: newName.trim(),
-          unit: newUnit.trim() || "UN",
-        }),
-      });
-      if (!resp.ok) {
-        const tx = await safeJson(resp);
-        const msg = tx?.error || `Falha ao criar (HTTP ${resp.status})`;
-        throw new Error(msg);
-      }
-      // sucesso
-      setOpenNew(false);
-      setNewSku("");
-      setNewName("");
-      setNewUnit("UN");
-      resetAndReload();
-      await load();
-    } catch (e: any) {
-      setNewErr(String(e?.message ?? e));
-    } finally {
-      setNewSaving(false);
-    }
-  }
+  const columnsCount = 6; // ID, SKU, Nome, Unid, Ativo, Ações
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
@@ -133,23 +121,41 @@ export default function ProdutosPage() {
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Produtos</h1>
             <p className="text-sm text-gray-500">
-              Cadastre e pesquise SKUs. {isAdmin ? "Você tem permissão para criar." : "Somente Admin pode criar."}
+              Cadastre e pesquise SKUs.
+              {isAdmin ? " Você tem permissão para criar/editar." : ""}
             </p>
           </div>
+
           {isAdmin && (
-            <button
-              onClick={() => setOpenNew(true)}
+            <Link
+              href={`/produtos/novo${unitId ? `?unitId=${unitId}` : ""}`}
               className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
             >
               Novo Produto
-            </button>
+            </Link>
           )}
         </header>
 
         {/* Filtros */}
         <section className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex-1">
+          <div className="grid gap-3 sm:grid-cols-6 sm:items-end">
+            {/* Unidade */}
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Unidade</label>
+              <div className="mt-1">
+                <UnitSelect
+                  role={role}
+                  value={unitId}
+                  onChange={(v) => {
+                    setUnitId(v);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Buscar */}
+            <div className="sm:col-span-3">
               <label className="block text-sm font-medium text-gray-700">Buscar</label>
               <input
                 className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
@@ -159,22 +165,26 @@ export default function ProdutosPage() {
                 onKeyDown={(e) => e.key === "Enter" && resetAndReload()}
               />
             </div>
+
+            {/* Ativo */}
             <div>
               <label className="block text-sm font-medium text-gray-700">Ativo</label>
               <select
-                className="mt-1 rounded-xl border border-gray-300 px-3 py-2"
-                value={active}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2"
+                value={activeFilter}
                 onChange={(e) => {
-                  setActive(e.target.value as any);
+                  setActiveFilter(e.target.value as any);
                   setPage(1);
                 }}
               >
                 <option value="all">Todos</option>
-                <option value="true">Somente ativos</option>
-                <option value="false">Somente inativos</option>
+                <option value="true">Ativos</option>
+                <option value="false">Inativos</option>
               </select>
             </div>
-            <div className="sm:w-40">
+
+            {/* Aplicar */}
+            <div>
               <button
                 onClick={resetAndReload}
                 className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
@@ -196,35 +206,54 @@ export default function ProdutosPage() {
                   <th className="px-4 py-3">Nome</th>
                   <th className="px-4 py-3">Unid.</th>
                   <th className="px-4 py-3">Ativo</th>
+                  <th className="px-4 py-3">Ações</th>
                 </tr>
               </thead>
+
               <tbody>
-                {loading ? (
+                {mustPickUnit ? (
                   <tr>
-                    <td className="px-4 py-6 text-center" colSpan={5}>
+                    <td className="px-4 py-6 text-center text-gray-500" colSpan={columnsCount}>
+                      Selecione uma unidade para listar os produtos.
+                    </td>
+                  </tr>
+                ) : loading ? (
+                  <tr>
+                    <td className="px-4 py-6 text-center" colSpan={columnsCount}>
                       Carregando...
                     </td>
                   </tr>
-                ) : loadErr ? (
+                ) : err ? (
                   <tr>
-                    <td className="px-4 py-6 text-center text-red-600" colSpan={5}>
-                      {loadErr}
+                    <td className="px-4 py-6 text-center text-red-600" colSpan={columnsCount}>
+                      {err}
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-center text-gray-500" colSpan={5}>
+                    <td className="px-4 py-6 text-center text-gray-500" colSpan={columnsCount}>
                       Nenhum produto encontrado.
                     </td>
                   </tr>
                 ) : (
                   rows.map((p) => (
                     <tr key={p.id} className="border-t border-gray-100">
-                      <td className="px-4 py-3">{p.id}</td>
-                      <td className="px-4 py-3 font-medium">{p.sku}</td>
+                      <td className="px-4 py-3 font-medium">{p.id}</td>
+                      <td className="px-4 py-3">{p.sku}</td>
                       <td className="px-4 py-3">{p.name}</td>
-                      <td className="px-4 py-3">{p.unit}</td>
-                      <td className="px-4 py-3">{truthy(p.isActive) ? "Sim" : "Não"}</td>
+                      <td className="px-4 py-3">{p.unit ?? "UN"}</td>
+                      <td className="px-4 py-3">{isActiveText(p.isActive)}</td>
+
+                      {role === "admin" && (
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/produtos/${p.id}/editar${unitId ? `?unitId=${unitId}` : ""}`}
+                            className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                          >
+                            Editar
+                          </Link>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -257,80 +286,12 @@ export default function ProdutosPage() {
           </div>
         </section>
       </div>
-
-      {/* Modal Novo Produto (somente Admin) */}
-      {isAdmin && openNew && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Novo Produto</h3>
-              <button onClick={() => setOpenNew(false)} className="text-gray-500 hover:text-gray-700">
-                ✕
-              </button>
-            </div>
-
-            {newErr && (
-              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {newErr}
-              </div>
-            )}
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-1">
-                <label className="block text-sm font-medium text-gray-700">SKU</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
-                  value={newSku}
-                  onChange={(e) => setNewSku(e.target.value)}
-                  placeholder="Ex.: SKU-010"
-                />
-              </div>
-              <div className="sm:col-span-1">
-                <label className="block text-sm font-medium text-gray-700">Unidade</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
-                  value={newUnit}
-                  onChange={(e) => setNewUnit(e.target.value)}
-                  placeholder="UN / CX / KG"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">Nome</label>
-                <input
-                  className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Nome do produto"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => setOpenNew(false)}
-                className="rounded-xl border px-4 py-2"
-                disabled={newSaving}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={createProduct}
-                disabled={newSaving}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
-              >
-                {newSaving ? "Salvando..." : "Salvar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
 
-// Helpers
-function truthy(v: any) {
-  return v === true || v === 1 || v === "1";
+function isActiveText(v: boolean | 0 | 1) {
+  return v === true || v === 1 ? "Sim" : "Não";
 }
 
 async function safeText(r: Response) {
@@ -343,6 +304,8 @@ async function safeText(r: Response) {
 
 async function safeJson(r: Response) {
   try {
+    const ctype = (r.headers.get("content-type") || "").toLowerCase();
+    if (!ctype.includes("application/json")) return null as any;
     return await r.json();
   } catch {
     return null as any;
