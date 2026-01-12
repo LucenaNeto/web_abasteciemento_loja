@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { db, schema } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
@@ -12,11 +12,15 @@ function parseId(idRaw: string) {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
 
-  const id = parseId(ctx.params.id);
+  const { id: idParam } = await params;
+  const id = parseId(idParam);
   if (!id) return NextResponse.json({ error: "ID inválido." }, { status: 400 });
 
   const [row] = await db
@@ -38,11 +42,15 @@ const patchSchema = z.object({
   stock: z.number().int().min(0).nullable().optional(),
 });
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
 
-  const id = parseId(ctx.params.id);
+  const { id: idParam } = await params;
+  const id = parseId(idParam);
   if (!id) return NextResponse.json({ error: "ID inválido." }, { status: 400 });
 
   let payload: z.infer<typeof patchSchema>;

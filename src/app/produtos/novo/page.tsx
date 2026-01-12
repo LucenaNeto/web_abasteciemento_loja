@@ -2,14 +2,14 @@
 "use client";
 
 import UnitSelect from "@/components/UnitSelect";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type Role = "admin" | "store" | "warehouse";
 
-export default function NovoProdutoPage() {
+function NovoProdutoInner() {
   const { data: session, status } = useSession();
   const role = (session?.user as any)?.role as Role | undefined;
 
@@ -32,17 +32,19 @@ export default function NovoProdutoPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // ✅ lê unitId da URL de forma estável
+  const unitIdFromUrl = useMemo(() => {
+    const fromUrl = searchParams.get("unitId");
+    if (!fromUrl) return null;
+    const n = Number(fromUrl);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [searchParams]);
+
   // ✅ tenta pré-preencher unitId vindo da URL (?unitId=4)
   useEffect(() => {
     if (status !== "authenticated") return;
-
-    const fromUrl = searchParams.get("unitId");
-    if (fromUrl) {
-      const n = Number(fromUrl);
-      if (Number.isFinite(n) && n > 0) setUnitId(n);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+    if (unitId == null && unitIdFromUrl != null) setUnitId(unitIdFromUrl);
+  }, [status, unitIdFromUrl, unitId]);
 
   const stockNumber = useMemo(() => {
     const n = Number(stock);
@@ -138,11 +140,7 @@ export default function NovoProdutoPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700">Unidade</label>
               <div className="mt-1 max-w-md">
-                <UnitSelect
-                  role={role}
-                  value={unitId}
-                  onChange={(v) => setUnitId(v)}
-                />
+                <UnitSelect role={role} value={unitId} onChange={(v) => setUnitId(v)} />
               </div>
               <p className="mt-1 text-xs text-gray-500">
                 Este produto será criado dentro da unidade selecionada.
@@ -221,10 +219,7 @@ export default function NovoProdutoPage() {
                 {saving ? "Salvando..." : "Salvar produto"}
               </button>
 
-              <Link
-                href="/produtos"
-                className="rounded-xl border px-4 py-2 hover:bg-gray-50"
-              >
+              <Link href="/produtos" className="rounded-xl border px-4 py-2 hover:bg-gray-50">
                 Cancelar
               </Link>
             </div>
@@ -235,8 +230,15 @@ export default function NovoProdutoPage() {
   );
 }
 
+export default function NovoProdutoPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Carregando...</div>}>
+      <NovoProdutoInner />
+    </Suspense>
+  );
+}
+
 async function safeJson(r: Response) {
-  // Robusto p/ respostas sem corpo ou não-JSON
   if (r.status === 204 || r.status === 205 || r.status === 304) return null as any;
   const ctype = (r.headers.get("content-type") || "").toLowerCase();
   if (!ctype.includes("application/json")) return null as any;

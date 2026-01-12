@@ -1,22 +1,16 @@
 // src/app/api/usuarios/[id]/units/route.ts
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Lê params com segurança (mesmo se vier Promise em alguns builds/dev) */
-async function getParamsSafe(params: any) {
-  return await Promise.resolve(params);
-}
-
-function parseUserId(p: any) {
-  // ✅ como a pasta é [id], o param certo é id
-  const raw = p?.id ?? p?.userId;
-  const n = Number(raw);
+function parseUserIdFromParam(id: string) {
+  const raw = decodeURIComponent(String(id ?? "")).trim();
+  const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) ? n : NaN;
 }
 
@@ -24,12 +18,15 @@ function parseUserId(p: any) {
  * GET /api/usuarios/:id/units
  * Retorna as unidades associadas ao usuário + qual é primária
  */
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
 
-  const p = await getParamsSafe(ctx.params);
-  const userId = parseUserId(p);
+  const { id } = await params;
+  const userId = parseUserIdFromParam(id);
 
   if (!Number.isFinite(userId) || userId <= 0) {
     return NextResponse.json({ error: "userId inválido." }, { status: 400 });
@@ -80,12 +77,15 @@ const bodySchema = z.object({
   primaryUnitId: z.number().int().positive().nullable().optional(),
 });
 
-async function saveUnits(req: Request, ctx: { params: { id: string } }) {
+async function saveUnits(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const guard = await ensureRoleApi(["admin"]);
   if (!guard.ok) return guard.res;
 
-  const p = await getParamsSafe(ctx.params);
-  const userId = parseUserId(p);
+  const { id } = await params;
+  const userId = parseUserIdFromParam(id);
 
   if (!Number.isFinite(userId) || userId <= 0) {
     return NextResponse.json({ error: "userId inválido." }, { status: 400 });
@@ -101,11 +101,7 @@ async function saveUnits(req: Request, ctx: { params: { id: string } }) {
     );
   }
 
-  const unitIds =
-    payload.unitIds ?? payload.units ?? payload.allowedUnitIds ?? [];
-
-  // pode remover todas? se você NÃO quiser permitir, troque por erro.
-  // if (unitIds.length === 0) return NextResponse.json({ error: "Selecione ao menos 1 unidade." }, { status: 400 });
+  const unitIds = payload.unitIds ?? payload.units ?? payload.allowedUnitIds ?? [];
 
   // remove duplicados
   const unique = Array.from(new Set(unitIds));
@@ -139,18 +135,13 @@ async function saveUnits(req: Request, ctx: { params: { id: string } }) {
       .where(inArray(schema.units.id, unique));
 
     if (found.length !== unique.length) {
-      return NextResponse.json(
-        { error: "Alguma unidade informada não existe." },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Alguma unidade informada não existe." }, { status: 400 });
     }
   }
 
   await withTransaction(async (tx) => {
     // apaga todas as relações atuais
-    await tx
-      .delete(schema.userUnits)
-      .where(eq(schema.userUnits.userId, userId));
+    await tx.delete(schema.userUnits).where(eq(schema.userUnits.userId, userId));
 
     // recria relações
     if (unique.length > 0) {
@@ -169,10 +160,16 @@ async function saveUnits(req: Request, ctx: { params: { id: string } }) {
   });
 }
 
-export async function PUT(req: Request, ctx: { params: { id: string } }) {
+export async function PUT(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
   return saveUnits(req, ctx);
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
   return saveUnits(req, ctx);
 }
