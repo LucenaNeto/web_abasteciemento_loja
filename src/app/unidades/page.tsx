@@ -309,9 +309,10 @@ export default function UnidadesPage() {
 }
 
 async function safeJson(r: Response) {
-  try {
-    return await r.json();
-  } catch {
-    return null;
-  }
+  if (r.status === 204 || r.status === 205 || r.status === 304) return null as any;
+  const ctype = (r.headers.get("content-type") || "").toLowerCase();
+  const text = await r.text().catch(() => "");
+  if (!text) return null as any;
+  if (!ctype.includes("application/json")) return { error: text } as any;
+  try { return JSON.parse(text); } catch { return { error: text } as any; }
 }
