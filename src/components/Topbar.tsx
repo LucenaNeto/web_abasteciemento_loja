@@ -29,13 +29,21 @@ function NavLink({
 export default function Topbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+
   if (pathname?.startsWith("/login")) {
     return null;
   }
+
   const user = session?.user as any;
   const role = (user?.role ?? "") as "admin" | "store" | "warehouse" | "";
   const roleLabel =
-    role === "admin" ? "Administrador" : role === "store" ? "Loja" : role === "warehouse" ? "Almoxarifado" : "";
+    role === "admin"
+      ? "Administrador"
+      : role === "store"
+      ? "Loja"
+      : role === "warehouse"
+      ? "Almoxarifado"
+      : "";
 
   const isAdmin = role === "admin";
   const canCreateReq = role === "admin" || role === "store";
@@ -49,6 +57,7 @@ export default function Topbar() {
           <Link href="/" className="text-sm font-semibold text-gray-900">
             Reposição
           </Link>
+
           <nav className="hidden gap-1 sm:flex">
             <NavLink href="/" label="Início" active={pathname === "/"} />
 
@@ -92,27 +101,18 @@ export default function Topbar() {
               />
             )}
 
-            {/* Usuários/Auditoria (Admin) */}
+            {/* Admin */}
             {isAdmin && (
-              <NavLink
-                href="/usuarios"
-                label="Usuários"
-                active={pathname.startsWith("/usuarios")}
-              />
+              <NavLink href="/usuarios" label="Usuários" active={pathname.startsWith("/usuarios")} />
             )}
             {isAdmin && (
-              <NavLink
-                href="/auditoria"
-                label="Auditoria"
-                active={pathname.startsWith("/auditoria")}
-              />
+              <NavLink href="/unidades" label="Unidades" active={pathname.startsWith("/unidades")} />
             )}
             {isAdmin && (
-              <NavLink
-                href="/relatorios"
-                label="Relatórios"
-                active={pathname.startsWith("/relatorios")}
-              />
+              <NavLink href="/auditoria" label="Auditoria" active={pathname.startsWith("/auditoria")} />
+            )}
+            {isAdmin && (
+              <NavLink href="/relatorios" label="Relatórios" active={pathname.startsWith("/relatorios")} />
             )}
           </nav>
         </div>
@@ -123,6 +123,7 @@ export default function Topbar() {
             <div className="text-sm font-medium text-gray-900">{user?.name ?? "Usuário"}</div>
             {roleLabel && <div className="text-xs text-gray-500">{roleLabel}</div>}
           </div>
+
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
             className="rounded-xl border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -137,18 +138,16 @@ export default function Topbar() {
       <div className="border-t border-gray-200 px-3 py-2 sm:hidden">
         <nav className="flex flex-wrap gap-2">
           <NavLink href="/" label="Início" active={pathname === "/"} />
+
           <NavLink
             href="/produtos"
             label="Produtos"
             active={pathname.startsWith("/produtos") && !pathname.startsWith("/produtos/import")}
           />
           {isAdmin && (
-            <NavLink
-              href="/produtos/import"
-              label="Importar"
-              active={pathname.startsWith("/produtos/import")}
-            />
+            <NavLink href="/produtos/import" label="Importar" active={pathname.startsWith("/produtos/import")} />
           )}
+
           <NavLink
             href="/requisicoes"
             label="Requisições"
@@ -160,11 +159,7 @@ export default function Topbar() {
             }
           />
           {canCreateReq && (
-            <NavLink
-              href="/requisicoes/nova"
-              label="Nova"
-              active={pathname.startsWith("/requisicoes/nova")}
-            />
+            <NavLink href="/requisicoes/nova" label="Nova" active={pathname.startsWith("/requisicoes/nova")} />
           )}
           {canHandleReq && (
             <NavLink
@@ -173,26 +168,18 @@ export default function Topbar() {
               active={pathname.startsWith("/requisicoes/pendentes")}
             />
           )}
+
           {isAdmin && (
-            <NavLink
-              href="/usuarios"
-              label="Usuários"
-              active={pathname.startsWith("/usuarios")}
-            />
+            <NavLink href="/usuarios" label="Usuários" active={pathname.startsWith("/usuarios")} />
           )}
           {isAdmin && (
-            <NavLink
-              href="/auditoria"
-              label="Auditoria"
-              active={pathname.startsWith("/auditoria")}
-            />
+            <NavLink href="/unidades" label="Unidades" active={pathname.startsWith("/unidades")} />
           )}
           {isAdmin && (
-            <NavLink
-              href="/relatorios/requisicoes/requisicoes"
-              label="Relatórios"
-              active={pathname.startsWith("/relatorios")}
-            />
+            <NavLink href="/auditoria" label="Auditoria" active={pathname.startsWith("/auditoria")} />
+          )}
+          {isAdmin && (
+            <NavLink href="/relatorios" label="Relatórios" active={pathname.startsWith("/relatorios")} />
           )}
         </nav>
       </div>
