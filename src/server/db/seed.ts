@@ -6,6 +6,7 @@ dotenv.config();
 import { and, eq, ne } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db, schema } from "./index";
+import { assertSafeDb } from "../../../scripts/guard-db";
 
 async function ensureDefaultUnit() {
   const code = process.env.SEED_DEFAULT_UNIT_CODE ?? "00000";
@@ -76,6 +77,8 @@ async function ensureUserPrimaryUnit(userId: number, unitId: number) {
 }
 
 async function main() {
+  assertSafeDb("db:seed");
+
   console.log("🔎 Garantindo unidade padrão...");
   const unitId = await ensureDefaultUnit();
 

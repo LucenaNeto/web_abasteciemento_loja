@@ -1,5 +1,7 @@
 // src/server/db/index.ts
 try {
+  // require (e não import) de propósito: scripts tsx (seed) não têm o pacote ativo
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("server-only");
 } catch {}
 

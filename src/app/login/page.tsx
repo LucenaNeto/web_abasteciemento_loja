@@ -16,6 +16,7 @@ export default function LoginPage() {
     const sp = new URLSearchParams(window.location.search);
     const err = sp.get("error");
     if (err) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- lê ?error= só no cliente
       setErrorMsg(
         err === "CredentialsSignin"
           ? "Credenciais inválidas. Verifique e tente novamente."

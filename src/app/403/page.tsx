@@ -1,4 +1,6 @@
 // src/app/403/page.tsx
+import Link from "next/link";
+
 export const metadata = { title: "Acesso negado • 403" };
 
 export default function ForbiddenPage() {
@@ -16,12 +18,12 @@ export default function ForbiddenPage() {
         </p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <a
+          <Link
             href="/"
             className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50"
           >
             ← Voltar ao início
-          </a>
+          </Link>
           <a
             href="/login"
             className="rounded-xl bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800"
