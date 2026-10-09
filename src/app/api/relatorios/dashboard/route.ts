@@ -1,5 +1,5 @@
 // src/app/api/relatorios/dashboard/route.ts
-// Métricas do dashboard (somente admin).
+// Métricas do dashboard (todos os perfis; não-admin vê só as próprias unidades).
 // GET /api/relatorios/dashboard?from=AAAA-MM-DD&to=AAAA-MM-DD[&unitId=N]
 //
 // Regras de tempo: created_at/completed_at ficam gravados em UTC (timestamp sem fuso);
@@ -39,8 +39,17 @@ const num = (v: unknown) => (v == null ? 0 : Number(v));
 const numOrNull = (v: unknown) => (v == null ? null : Number(v));
 
 export async function GET(req: Request) {
-  const guard = await ensureRoleApi(["admin"]);
+  // Aberto a todos os perfis (por enquanto). Admin vê tudo; loja e almoxarifado veem
+  // somente as unidades às quais estão vinculados.
+  const guard = await ensureRoleApi(["admin", "store", "warehouse"]);
   if (!guard.ok) return guard.res;
+
+  const sessionUser = guard.session.user as { id?: string; role?: string };
+  const isAdmin = sessionUser.role === "admin";
+  const meId = Number(sessionUser.id);
+  if (!isAdmin && !Number.isFinite(meId)) {
+    return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
+  }
 
   try {
     const { searchParams } = new URL(req.url);
@@ -67,7 +76,20 @@ export async function GET(req: Request) {
     // intervalo [from 00:00, to+1 00:00) de Brasília, convertido para UTC (naive) — usa índice
     const fromUtc = sql`((${from}::date)::timestamp AT TIME ZONE ${tzLit}) AT TIME ZONE 'UTC'`;
     const toUtc = sql`(((${to}::date + 1)::timestamp) AT TIME ZONE ${tzLit}) AT TIME ZONE 'UTC'`;
-    const unitR = unitId ? sql`AND r.unit_id = ${unitId}` : sql``;
+    // escopo de unidades: admin = todas (ou a escolhida); demais = só as vinculadas
+    let unitR = unitId ? sql`AND r.unit_id = ${unitId}` : sql``;
+    if (!isAdmin) {
+      const links = await db.execute(sql`SELECT unit_id FROM user_units WHERE user_id = ${meId}`);
+      const mine = (links.rows as Row[]).map((r) => num(r.unit_id));
+      if (unitId && !mine.includes(unitId)) {
+        return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
+      }
+      const allowed = unitId ? [unitId] : mine;
+      unitR =
+        allowed.length === 0
+          ? sql`AND false`
+          : sql`AND r.unit_id IN (${sql.join(allowed.map((id) => sql`${id}`), sql`, `)})`;
+    }
     const created = sql`r.created_at >= ${fromUtc} AND r.created_at < ${toUtc} ${unitR}`;
     const hours = sql`extract(epoch from (r.completed_at - r.created_at)) / 3600`;
     // dia/hora local de Brasília (sem parâmetros: a expressão é a mesma no SELECT e no GROUP BY)

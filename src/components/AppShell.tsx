@@ -35,12 +35,13 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { href: "/requisicoes/nova", label: "Nova requisição", icon: "plus", roles: ["admin", "store"] },
       { href: "/requisicoes/pendentes", label: "Fila de pendentes", icon: "inbox", roles: ["admin", "warehouse"] },
       { href: "/produtos", label: "Produtos", icon: "box", exclude: ["/produtos/import"] },
+      { href: "/relatorios", label: "Dashboard", icon: "chart", exclude: ["/relatorios/requisicoes"] },
+      { href: "/relatorios/requisicoes", label: "Relatório simples", icon: "list", roles: ["admin"] },
     ],
   },
   {
     title: "Administração",
     items: [
-      { href: "/relatorios", label: "Relatórios", icon: "chart", roles: ["admin"] },
       { href: "/produtos/import", label: "Importar produtos", icon: "upload", roles: ["admin"] },
       { href: "/usuarios", label: "Usuários", icon: "users", roles: ["admin"] },
       { href: "/unidades", label: "Unidades", icon: "building", roles: ["admin"] },

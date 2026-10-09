@@ -97,6 +97,16 @@ export function statusTimestamps(
   return patch;
 }
 
+/**
+ * Controle de estoque dentro do sistema (variável de ambiente STOCK_CONTROL=on|off, padrão off).
+ * - off: o estoque é controlado FORA do sistema. Entregas registram só a quantidade entregue:
+ *   não há aviso de estoque, nem movimentação, nem baixa em products.stock.
+ * - on: cada entrega/estorno gera movimento e baixa o estoque (com aviso quando insuficiente).
+ */
+export function stockControlEnabled() {
+  return (process.env.STOCK_CONTROL ?? "off").trim().toLowerCase() === "on";
+}
+
 type ApplyArgs = {
   requestId: number;
   /** itemId -> quantidade entregue ABSOLUTA desejada */
@@ -170,7 +180,8 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
     if (p.delta > 0) outByProduct.set(p.productId, (outByProduct.get(p.productId) ?? 0) + p.delta);
   }
   const warnings: StockWarning[] = [];
-  for (const [productId, out] of outByProduct) {
+  const controlStock = stockControlEnabled();
+  for (const [productId, out] of controlStock ? outByProduct : []) {
     const info = rows.find((r) => r.productId === productId)!;
     if (info.stock < out) {
       warnings.push({ productId, sku: info.sku, name: info.name, available: info.stock, requested: out });
@@ -201,7 +212,7 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
       })
       .where(eq(schema.requestItems.id, p.itemId));
 
-    if (p.delta !== 0) {
+    if (p.delta !== 0 && controlStock) {
       await tx.insert(schema.inventoryMovements).values({
         productId: p.productId,
         qty: Math.abs(p.delta),
@@ -223,7 +234,7 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
   for (const p of plan) {
     if (p.delta !== 0) netByProduct.set(p.productId, (netByProduct.get(p.productId) ?? 0) + p.delta);
   }
-  for (const [productId, net] of [...netByProduct].sort((a, b) => a[0] - b[0])) {
+  for (const [productId, net] of controlStock ? [...netByProduct].sort((a, b) => a[0] - b[0]) : []) {
     if (net === 0) continue;
     await tx
       .update(schema.products)

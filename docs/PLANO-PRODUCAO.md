@@ -138,11 +138,18 @@ criado no banco novo depois da virada precisaria ser reaplicado manualmente — 
 | Senha do banco exposta em capturas/chat | Ocorreu (homologação) | Resetar após os testes; nunca colar URLs completas |
 | 2.528 requisições "em progresso" antigas aparecem no dashboard | Fato | Está no backlog; avaliar limpeza com o almoxarifado |
 
-## 10. Decisões pendentes do Carlos
+## 10. Decisões do Carlos (2026-10-09)
 
-1. O projeto de **produção na conta nova já existe**? (necessário só para a Etapa B)
-2. Aprova a estratégia em **duas etapas** (A: código; B: banco)?
-3. **Data e janela** da Etapa A (sugestão: domingo de manhã).
-4. Plano do Supabase da conta antiga tem **backup automático**? (Pro: sim / Free: não)
-5. O estoque cadastrado é mantido pelo sistema ou por outro meio? (impacta o aviso de estoque e o que dizer ao almoxarifado)
-6. Quem acompanha o release do lado do negócio (um usuário de loja e um do almoxarifado para os testes)?
+1. Projeto de **produção na conta nova**: ainda **não existe** → a Etapa B fica para depois.
+2. Estratégia em **duas etapas**: **aprovada**.
+3. Etapa A: **domingo de manhã** (data a confirmar).
+4. Conta antiga do Supabase **sem backup automático** → os backups da seção 4 (cópia lógica + `pg_dump`) são obrigatórios.
+5. **O estoque é controlado em outro sistema.** Em produção 129.396 de 129.399 produtos têm estoque 0; por isso o
+   controle de estoque do sistema fica **desligado** (`STOCK_CONTROL=off`, padrão): entregas registram só a
+   quantidade entregue, sem aviso de estoque, movimentação ou baixa. Na Vercel (Production) definir
+   `STOCK_CONTROL=off` explicitamente (é o padrão, mas fica documentado).
+6. Testes de fumaça: o Carlos usa os dois perfis (loja e almoxarifado).
+
+### Alterações de permissão aprovadas antes do release
+- Dashboard (`/relatorios`) **liberado para todos os perfis**; loja e almoxarifado veem só as próprias unidades.
+- Criação de usuários, de unidades e importação de produtos continuam **somente do admin** (ver `docs/PERMISSOES.md`).

@@ -107,6 +107,11 @@ export function useNotifications(enabled: boolean) {
     };
   }, [soundOn, ensureAudio]);
 
+  // ao abrir o sistema com o som ligado, já avisa se o navegador ainda está bloqueando (precisa de 1 clique)
+  useEffect(() => {
+    if (soundOn) void ensureAudio();
+  }, [soundOn, ensureAudio]);
+
   const toggleSound = useCallback(async () => {
     const next = !soundOnRef.current;
     soundOnRef.current = next;
@@ -148,14 +153,14 @@ export function useNotifications(enabled: boolean) {
     }
   }, []);
 
-  // consulta periódica (só com a aba visível) + ao voltar para a aba
+  // consulta periódica + ao voltar para a aba.
+  // Continua mesmo com a aba em segundo plano (o navegador reduz a frequência para ~1 por minuto,
+  // mas o aviso e o som ainda chegam): o almoxarife não precisa deixar a aba na frente.
   useEffect(() => {
     if (!enabled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, POLL_MS);
+    const timer = window.setInterval(() => void load(), POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
@@ -208,8 +213,10 @@ export function NotificationBell({ state, variant }: { state: State; variant: "d
   const [open, setOpen] = useState(false);
   const { items, unread, soundOn, audioBlocked, toggleSound, markRead, ensureAudio } = state;
 
-  const btn =
-    variant === "dark"
+  const blocked = soundOn && audioBlocked;
+  const btn = blocked
+    ? "border-amber-400 bg-amber-100 text-amber-900 hover:bg-amber-200" // som ligado, mas o navegador ainda não liberou
+    : variant === "dark"
       ? "border-brand-700 text-brand-100 hover:bg-brand-800"
       : "border-gray-200 text-brand-900 hover:bg-gray-50";
 
@@ -218,6 +225,7 @@ export function NotificationBell({ state, variant }: { state: State; variant: "d
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label={unread > 0 ? `${unread} avisos não lidos` : "Avisos"}
+        title={blocked ? "Som ligado, mas o navegador bloqueou: clique em qualquer lugar da página para liberar" : undefined}
         aria-expanded={open}
         className={`relative rounded-lg border p-2 ${btn}`}
       >
