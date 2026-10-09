@@ -302,6 +302,34 @@ describe("2.6 importação", () => {
   });
 });
 
+describe("2.6 importação de planilha (.xlsx)", () => {
+  it("lê um .xlsx com cabeçalhos em português e cria os produtos", async () => {
+    const XLSX = await import("xlsx");
+    const sku = `XLS-${uid()}`;
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Código", "Descrição", "Unidade"],
+      [sku, "Produto da planilha", "CX"],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Produtos");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+
+    const fd = new FormData();
+    fd.set("mode", "insert");
+    fd.set("unitId", String(w.unit.id));
+    fd.set("file", new Blob([new Uint8Array(buf)]), "produtos.xlsx");
+
+    asAdmin();
+    const res = await importProducts(new Request("http://localhost/api/produtos/import", { method: "POST", body: fd }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).type).toBe("excel");
+
+    const rows = await db.select().from(schema.products).where(and(eq(schema.products.unitId, w.unit.id), eq(schema.products.sku, sku)));
+    expect(rows).toHaveLength(1);
+    expect([rows[0].name, rows[0].unit]).toEqual(["Produto da planilha", "CX"]);
+  });
+});
+
 describe("2.2 unidades", () => {
   const uctx = (id: number) => ({ params: Promise.resolve({ id: String(id) }) });
 

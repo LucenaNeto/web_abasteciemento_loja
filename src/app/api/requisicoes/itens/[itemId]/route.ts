@@ -10,6 +10,7 @@ import {
   itemStatuses,
   lockRequest,
   requestStatusFromItems,
+  statusTimestamps,
   userHasUnit,
 } from "@/server/requests/delivery";
 
@@ -177,7 +178,14 @@ export async function PATCH(
       if (computed !== currentReq.status) {
         await tx
           .update(schema.requests)
-          .set({ status: computed, updatedAt: new Date() })
+          .set({
+            status: computed,
+            updatedAt: new Date(),
+            ...statusTimestamps(
+              { status: currentReq.status as RequestStatus, startedAt: currentReq.startedAt },
+              computed,
+            ),
+          })
           .where(eq(schema.requests.id, cur.requestId));
 
         await tx.insert(schema.auditLogs).values({

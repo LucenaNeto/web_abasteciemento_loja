@@ -22,11 +22,15 @@ export type UserRole = (typeof userRoles)[number];
 export const requestStatus = ["pending", "in_progress", "completed", "cancelled"] as const;
 export type RequestStatus = (typeof requestStatus)[number];
 
-export const itemStatus = ["pending", "partial", "delivered", "cancelled"] as const;
+// unavailable = item sem estoque físico (separador avisa o solicitante)
+export const itemStatus = ["pending", "partial", "delivered", "cancelled", "unavailable"] as const;
 export type ItemStatus = (typeof itemStatus)[number];
 
 export const criticalityLevels = ["cashier", "service", "restock"] as const;
 export type CriticalityLevel = (typeof criticalityLevels)[number];
+
+export const notificationTypes = ["request_created", "request_cancelled", "item_unavailable"] as const;
+export type NotificationType = (typeof notificationTypes)[number];
 
 export const movementTypes = ["in", "out", "adjust"] as const;
 export type MovementType = (typeof movementTypes)[number];
@@ -152,10 +156,21 @@ export const requests = pgTable(
 
     note: text("note"),
 
+    // marcos do atendimento (base do dashboard de produtividade)
+    startedAt: timestamp("started_at", { withTimezone: false }), // 1º "em progresso"
+    completedAt: timestamp("completed_at", { withTimezone: false }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: false }),
+    cancelledByUserId: integer("cancelled_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    cancelReason: text("cancel_reason"),
+
     createdAt: timestamp("created_at", { withTimezone: false }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: false }).notNull().defaultNow(),
   },
   (table) => ({
+    unitCreatedIdx: index("idx_requests_unit_created").on(table.unitId, table.createdAt),
     unitIdx: index("idx_requests_unit").on(table.unitId),
     statusIdx: index("idx_requests_status").on(table.status),
     createdByIdx: index("idx_requests_created_by").on(table.createdByUserId),
@@ -187,6 +202,9 @@ export const requestItems = pgTable(
       .notNull()
       .default("pending")
       .$type<ItemStatus>(),
+
+    // motivo (ex.: item sem estoque físico)
+    statusNote: text("status_note"),
 
     createdAt: timestamp("created_at", { withTimezone: false }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: false }).notNull().defaultNow(),
@@ -224,6 +242,29 @@ export const inventoryMovements = pgTable(
     imProductIdx: index("idx_im_product").on(table.productId),
     // não-único: um item pode ter vários movimentos (entregas parciais e estornos)
     imRefIdx: index("idx_im_ref").on(table.refType, table.requestItemId),
+  }),
+);
+
+/* =========================
+ * Notifications (avisos dentro do sistema)
+ * =======================*/
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type", { enum: notificationTypes }).notNull().$type<NotificationType>(),
+    requestId: integer("request_id").references(() => requests.id, { onDelete: "cascade" }),
+    requestItemId: integer("request_item_id").references(() => requestItems.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: false }).notNull().defaultNow(),
+    readAt: timestamp("read_at", { withTimezone: false }),
+  },
+  (table) => ({
+    userReadIdx: index("idx_notifications_user_read").on(table.userId, table.readAt),
+    userCreatedIdx: index("idx_notifications_user_created").on(table.userId, table.createdAt),
   }),
 );
 

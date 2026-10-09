@@ -43,6 +43,13 @@
       "when": 1791561240115,
       "tag": "0005_movimentos_varias_entregas",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791563153921,
+      "tag": "0006_fase3_marcos_e_notificacoes",
+      "breakpoints": true
     }
   ]
 }

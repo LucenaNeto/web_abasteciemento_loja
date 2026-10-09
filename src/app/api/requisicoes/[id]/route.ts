@@ -9,6 +9,7 @@ import {
   applyDeliveries,
   lockRequest,
   requestStatusFromItems,
+  statusTimestamps,
   userHasUnit,
   type StockWarning,
 } from "@/server/requests/delivery";
@@ -88,11 +89,22 @@ export async function GET(
     assignedTo = ass ?? null;
   }
 
+  let cancelledBy: { id: number; name: string } | null = null;
+  if (reqRow.cancelledByUserId) {
+    const [c] = await db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, reqRow.cancelledByUserId))
+      .limit(1);
+    cancelledBy = c ?? null;
+  }
+
   return NextResponse.json({
     data: {
       ...reqRow,
       createdBy,
       assignedTo,
+      cancelledBy,
       items,
     },
   });
@@ -106,6 +118,7 @@ const patchSchema = z.object({
   status: z.enum(["in_progress", "completed", "cancelled"]).optional(),
   assignToMe: z.boolean().optional().default(false),
   note: z.string().optional(),
+  cancelReason: z.string().trim().max(300).optional(),
   confirmInsufficientStock: z.boolean().optional().default(false),
   items: z
     .array(
@@ -122,8 +135,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string | string[] }> },
 ) {
-  // Permissão: somente admin/warehouse movimentam estoque
-  const guard = await ensureRoleApi(["admin", "warehouse"]);
+  // admin/warehouse atendem e movimentam estoque; store só pode CANCELAR a própria requisição pendente
+  const guard = await ensureRoleApi(["admin", "warehouse", "store"]);
   if (!guard.ok) return guard.res;
 
   const { id: idParam } = await params;
@@ -148,6 +161,17 @@ export async function PATCH(
   const role = String(sessionUser?.role ?? "");
   const userId = Number(sessionUser?.id) || null;
 
+  if (role === "store") {
+    const onlyCancel =
+      payload.status === "cancelled" &&
+      !(payload.items?.length) &&
+      !payload.assignToMe &&
+      payload.note === undefined;
+    if (!onlyCancel) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+
   try {
     const result = await withTransaction(async (tx) => {
       // 1) Trava a requisição: dois atendimentos simultâneos não se atropelam
@@ -155,6 +179,18 @@ export async function PATCH(
       if (!reqRow) throw new ApiError(404, "Requisição não encontrada");
       if (reqRow.status === "cancelled")
         throw new ApiError(400, "Requisição cancelada não pode ser alterada");
+
+      // Loja só cancela a PRÓPRIA requisição e enquanto ninguém começou a atender
+      if (role === "store") {
+        if (reqRow.createdByUserId !== userId)
+          throw new ApiError(403, "Só quem criou a requisição pode cancelá-la.");
+        if (reqRow.status !== "pending")
+          throw new ApiError(
+            400,
+            "Só é possível cancelar requisições pendentes. Fale com o almoxarifado.",
+            "NOT_PENDING",
+          );
+      }
 
       // Concluída é final: só um admin pode reabrir (status in_progress). Repetir
       // "concluir" é inofensivo (idempotente) e não mexe em nada.
@@ -233,6 +269,18 @@ export async function PATCH(
         status: nextStatus,
         updatedAt: new Date(),
       };
+      Object.assign(
+        patchReq,
+        statusTimestamps(
+          { status: reqRow.status as RequestStatus, startedAt: reqRow.startedAt },
+          nextStatus,
+        ),
+      );
+      if (nextStatus === "cancelled") {
+        patchReq.cancelledAt = new Date();
+        patchReq.cancelledByUserId = userId;
+        patchReq.cancelReason = payload.cancelReason || null;
+      }
       if (payload.assignToMe && userId) patchReq.assignedToUserId = userId;
       if (payload.note !== undefined) patchReq.note = payload.note;
 
@@ -248,6 +296,7 @@ export async function PATCH(
           from: reqRow.status,
           to: nextStatus,
           note: payload.note ?? undefined,
+          cancelReason: nextStatus === "cancelled" ? payload.cancelReason || undefined : undefined,
           stockWarningsConfirmed: warnings.length ? warnings : undefined,
           items: plan.map((p) => ({
             itemId: p.itemId,

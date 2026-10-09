@@ -76,6 +76,24 @@ export function requestStatusFromItems(statuses: ItemStatus[], current: RequestS
   return current;
 }
 
+/**
+ * Marcos de tempo da requisição ao mudar de status (base do dashboard).
+ * - started_at: 1ª vez em "em progresso" (nunca é apagado)
+ * - completed_at: ao concluir; limpo se um admin reabrir
+ * (cancelamento é tratado na rota, pois guarda quem cancelou e o motivo)
+ */
+export function statusTimestamps(
+  prev: { status: RequestStatus; startedAt: Date | null },
+  next: RequestStatus,
+  now: Date = new Date(),
+) {
+  const patch: { startedAt?: Date; completedAt?: Date | null } = {};
+  if (next === "in_progress" && !prev.startedAt) patch.startedAt = now;
+  if (next === "completed" && prev.status !== "completed") patch.completedAt = now;
+  if (next !== "completed" && prev.status === "completed") patch.completedAt = null;
+  return patch;
+}
+
 type ApplyArgs = {
   requestId: number;
   /** itemId -> quantidade entregue ABSOLUTA desejada */

@@ -20,11 +20,14 @@ type Req = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
 };
 
 type ReqDetail = Req & {
   createdBy?: { id: number; name: string };
   assignedTo?: { id: number; name: string } | null;
+  cancelledBy?: { id: number; name: string } | null;
   items: Array<{
     id: number;
     productId: number;
@@ -52,6 +55,7 @@ export default function ReqDetailPage() {
     | undefined;
 
   const canOperate = role === "admin" || role === "warehouse";
+  const myId = Number((session?.user as any)?.id);
 
   const [data, setData] = useState<ReqDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -96,6 +100,24 @@ export default function ReqDetailPage() {
       return alert(
         (await safeJson(r))?.error || `Falha (HTTP ${r.status})`,
       );
+    await load();
+  }
+
+  // loja cancela só a própria requisição pendente; admin/almoxarifado também podem
+  // (a requisição continua no histórico como "cancelada")
+  async function cancelRequest() {
+    if (!data) return;
+    const reason = window.prompt(
+      "Cancelar esta requisição? Ela continuará no histórico como cancelada.\n\nMotivo (opcional):",
+      "",
+    );
+    if (reason === null) return; // desistiu
+    const r = await fetch(`/api/requisicoes/${data.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "cancelled", cancelReason: reason.trim() || undefined }),
+    });
+    if (!r.ok) return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
     await load();
   }
 
@@ -187,8 +209,24 @@ export default function ReqDetailPage() {
                     Obs.: {data.note}
                   </p>
                 ) : null}
+                {data.status === "cancelled" ? (
+                  <p className="mt-1 text-sm text-red-700">
+                    Cancelada{data.cancelledBy?.name ? ` por ${data.cancelledBy.name}` : ""}
+                    {data.cancelledAt ? ` em ${new Date(data.cancelledAt + "Z").toLocaleString()}` : ""}
+                    {data.cancelReason ? ` — Motivo: ${data.cancelReason}` : ""}
+                  </p>
+                ) : null}
               </div>
               <div className="flex gap-2">
+                {data.status === "pending" &&
+                  (canOperate || (role === "store" && data.createdByUserId === myId)) && (
+                    <button
+                      onClick={cancelRequest}
+                      className="rounded-lg border border-red-200 px-3 py-1.5 text-red-700 hover:bg-red-50"
+                    >
+                      Cancelar
+                    </button>
+                  )}
                 {canOperate && data.status === "pending" && (
                   <button
                     onClick={assume}
