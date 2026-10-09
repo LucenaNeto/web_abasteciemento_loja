@@ -69,7 +69,10 @@ export function itemStatusFor(delivered: number, requested: number): ItemStatus 
 export function requestStatusFromItems(statuses: ItemStatus[], current: RequestStatus): RequestStatus {
   if (current === "cancelled") return "cancelled";
   if (statuses.length > 0 && statuses.every((s) => s === "cancelled")) return "cancelled";
-  if (statuses.every((s) => s === "delivered" || s === "cancelled")) return "completed";
+  // itens entregues, cancelados ou sem estoque estão "resolvidos"
+  if (statuses.every((s) => s === "delivered" || s === "cancelled" || s === "unavailable")) {
+    return "completed";
+  }
   if (statuses.some((s) => s === "delivered" || s === "partial") || current === "in_progress") {
     return "in_progress";
   }
@@ -130,9 +133,14 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
     }
   }
 
-  // 1) plano: itens cancelados não mudam
+  // 1) plano: itens cancelados não mudam; itens "sem estoque" só voltam ao normal
+  //    se alguém informar uma quantidade DIFERENTE da atual (salvar a tela sem mexer não reverte)
   const plan: PlanRow[] = rows.map((r) => {
-    if (r.statusPrev === "cancelled") {
+    const wanted = targets.get(r.itemId);
+    const fixed =
+      r.statusPrev === "cancelled" ||
+      (r.statusPrev === "unavailable" && (wanted == null || wanted === r.deliveredPrev));
+    if (fixed) {
       return {
         itemId: r.itemId,
         productId: r.productId,
@@ -140,10 +148,9 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
         deliveredPrev: r.deliveredPrev,
         deliveredFinal: r.deliveredPrev,
         delta: 0,
-        status: "cancelled",
+        status: r.statusPrev as ItemStatus,
       };
     }
-    const wanted = targets.get(r.itemId);
     const raw = wanted != null ? wanted : completeRest ? r.requested : r.deliveredPrev;
     const deliveredFinal = Math.max(0, Math.min(r.requested, raw));
     return {
@@ -185,7 +192,13 @@ export async function applyDeliveries(tx: Tx, args: ApplyArgs) {
 
     await tx
       .update(schema.requestItems)
-      .set({ deliveredQty: p.deliveredFinal, status: p.status, updatedAt: new Date() })
+      .set({
+        deliveredQty: p.deliveredFinal,
+        status: p.status,
+        // observação "sem estoque" só vale enquanto o item está sem estoque
+        ...(p.status === "unavailable" ? {} : { statusNote: null }),
+        updatedAt: new Date(),
+      })
       .where(eq(schema.requestItems.id, p.itemId));
 
     if (p.delta !== 0) {

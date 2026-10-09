@@ -64,13 +64,15 @@ export async function GET(
       requestedQty: schema.requestItems.requestedQty,
       deliveredQty: schema.requestItems.deliveredQty,
       status: schema.requestItems.status,
+      statusNote: schema.requestItems.statusNote,
       productSku: schema.products.sku,
       productName: schema.products.name,
       productUnit: schema.products.unit,
     })
     .from(schema.requestItems)
     .leftJoin(schema.products, eq(schema.products.id, schema.requestItems.productId))
-    .where(eq(schema.requestItems.requestId, id));
+    .where(eq(schema.requestItems.requestId, id))
+    .orderBy(schema.requestItems.id);
 
   // (opcional) nomes de usuário
   const [createdBy] = await db
@@ -99,9 +101,16 @@ export async function GET(
     cancelledBy = c ?? null;
   }
 
+  const [unit] = await db
+    .select({ id: schema.units.id, code: schema.units.code, name: schema.units.name })
+    .from(schema.units)
+    .where(eq(schema.units.id, reqRow.unitId))
+    .limit(1);
+
   return NextResponse.json({
     data: {
       ...reqRow,
+      unit: unit ?? null,
       createdBy,
       assignedTo,
       cancelledBy,
@@ -240,7 +249,9 @@ export async function PATCH(
       });
 
       if (wantCompleted) {
-        const open = plan.filter((p) => p.status !== "cancelled" && p.deliveredFinal < p.requested);
+        const open = plan.filter(
+          (p) => p.status !== "cancelled" && p.status !== "unavailable" && p.deliveredFinal < p.requested,
+        );
         if (open.length > 0)
           throw new ApiError(400, "Há itens com entrega parcial. Ajuste as quantidades para concluir.");
       }

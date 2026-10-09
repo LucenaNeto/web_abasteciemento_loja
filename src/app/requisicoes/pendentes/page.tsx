@@ -244,6 +244,14 @@ async function atender(id: number) {
                         >
                           Abrir
                         </Link>
+                        <Link
+                          href={`/requisicoes/${r.id}/imprimir?formato=a4`}
+                          target="_blank"
+                          className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                          title="Imprimir lista de separação"
+                        >
+                          Imprimir
+                        </Link>
                       </td>
                     </tr>
                   ))

@@ -71,7 +71,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   // sem menu no login
-  if (pathname.startsWith("/login")) return <>{children}</>;
+  if (pathname.startsWith("/login") || pathname.endsWith("/imprimir")) return <>{children}</>;
 
   const user = session?.user as { name?: string | null; role?: Role } | undefined;
   const role = user?.role;
@@ -151,12 +151,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen lg:pl-64">
+    <div className="min-h-screen lg:pl-64 print:pl-0">
       {/* menu fixo no desktop */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 lg:block">{sidebar}</aside>
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 lg:block print:hidden">{sidebar}</aside>
 
       {/* barra superior no celular */}
-      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden print:hidden">
         <button
           onClick={() => setOpen(true)}
           aria-label="Abrir menu"
@@ -169,7 +169,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* gaveta no celular */}
       {open && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 lg:hidden print:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-72 max-w-[85%] shadow-xl">{sidebar}</div>
         </div>

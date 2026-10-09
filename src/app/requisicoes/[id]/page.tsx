@@ -217,7 +217,21 @@ export default function ReqDetailPage() {
                   </p>
                 ) : null}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/requisicoes/${data.id}/imprimir?formato=a4`}
+                  target="_blank"
+                  className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                >
+                  Imprimir A4
+                </Link>
+                <Link
+                  href={`/requisicoes/${data.id}/imprimir?formato=termica`}
+                  target="_blank"
+                  className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                >
+                  Térmica
+                </Link>
                 {data.status === "pending" &&
                   (canOperate || (role === "store" && data.createdByUserId === myId)) && (
                     <button

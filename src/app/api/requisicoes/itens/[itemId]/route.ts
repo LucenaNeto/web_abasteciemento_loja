@@ -3,10 +3,12 @@ import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
 import { eq } from "drizzle-orm";
+import { notify } from "@/server/notifications";
 import type { RequestStatus } from "@/server/db/schema";
 import {
   ApiError,
   applyDeliveries,
+  itemStatusFor,
   itemStatuses,
   lockRequest,
   requestStatusFromItems,
@@ -78,7 +80,8 @@ export async function GET(
 // A quantidade entregue passa pela MESMA regra de baixa de estoque da rota da requisição.
 const patchSchema = z.object({
   deliveredQty: z.number().int().min(0).optional(),
-  status: z.literal("cancelled").optional(),
+  status: z.enum(["cancelled", "unavailable", "pending"]).optional(),
+  statusNote: z.string().trim().max(200).optional(),
   confirmInsufficientStock: z.boolean().optional().default(false),
 });
 
@@ -148,6 +151,48 @@ export async function PATCH(
           .update(schema.requestItems)
           .set({ status: "cancelled", updatedAt: new Date() })
           .where(eq(schema.requestItems.id, id));
+      } else if (payload.status === "unavailable") {
+        // Item sem estoque físico: o separador avisa e o solicitante é notificado.
+        // O que já foi entregue permanece; só o restante fica indisponível.
+        if (cur.status === "cancelled") throw new ApiError(400, "Item cancelado.");
+        if (cur.status === "delivered") throw new ApiError(400, "Item já foi entregue por completo.");
+
+        const note = payload.statusNote?.trim() || null;
+        await tx
+          .update(schema.requestItems)
+          .set({ status: "unavailable", statusNote: note, updatedAt: new Date() })
+          .where(eq(schema.requestItems.id, id));
+
+        if (cur.status !== "unavailable") {
+          const [prod] = await tx
+            .select({ sku: schema.products.sku, name: schema.products.name })
+            .from(schema.products)
+            .where(eq(schema.products.id, cur.productId))
+            .limit(1);
+          await notify(tx, [
+            {
+              userId: currentReq.createdByUserId,
+              type: "item_unavailable",
+              requestId: cur.requestId,
+              requestItemId: id,
+              message:
+                `Requisição #${cur.requestId}: o item ${prod?.sku ?? cur.productId} — ${prod?.name ?? ""} ` +
+                `está sem estoque no almoxarifado.${note ? ` Obs.: ${note}` : ""}`,
+            },
+          ]);
+        }
+      } else if (payload.status === "pending") {
+        // desfazer "sem estoque" (o produto chegou)
+        if (cur.status !== "unavailable")
+          throw new ApiError(400, "Só é possível desfazer itens marcados como sem estoque.");
+        await tx
+          .update(schema.requestItems)
+          .set({
+            status: itemStatusFor(cur.deliveredQty, cur.requestedQty),
+            statusNote: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.requestItems.id, id));
       } else {
         const wanted = payload.deliveredQty ?? cur.deliveredQty;
         ({ warnings } = await applyDeliveries(tx, {
@@ -167,7 +212,9 @@ export async function PATCH(
         payload: JSON.stringify({
           requestId: cur.requestId,
           before: { deliveredQty: cur.deliveredQty, status: cur.status },
-          request: payload.status === "cancelled" ? { cancelItem: true } : { deliveredQty: payload.deliveredQty },
+          request: payload.status
+            ? { status: payload.status, statusNote: payload.statusNote }
+            : { deliveredQty: payload.deliveredQty },
           stockWarningsConfirmed: warnings.length ? warnings : undefined,
         }),
       });
