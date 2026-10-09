@@ -11,7 +11,8 @@
     "db:studio": "drizzle-kit studio",
     "lint": "eslint",
     "db:seed": "tsx src/server/db/seed.ts",
-    "db:copy-prod": "tsx scripts/copy-prod-to-homolog.ts"
+    "db:copy-prod": "tsx scripts/copy-prod-to-homolog.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -41,6 +42,7 @@
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { patchWithStockConfirm } from "@/lib/patchWithStockConfirm";
 
 type Role = "admin" | "store" | "warehouse";
 
@@ -128,10 +129,8 @@ export default function AtenderRequisicaoPage() {
         deliveredQty: Number(qty) || 0,
       }));
 
-      const resp = await fetch(`/api/requisicoes/${requestId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items: payloadItems }),
+      const resp = await patchWithStockConfirm(`/api/requisicoes/${requestId}`, {
+        items: payloadItems,
       });
 
       if (!resp.ok) {
@@ -167,10 +166,8 @@ export default function AtenderRequisicaoPage() {
       setSaving(true);
       setErrMsg(null);
 
-      const resp = await fetch(`/api/requisicoes/${requestId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
+      const resp = await patchWithStockConfirm(`/api/requisicoes/${requestId}`, {
+        status: "completed",
       });
 
       if (!resp.ok) {

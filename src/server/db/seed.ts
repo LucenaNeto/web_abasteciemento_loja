@@ -28,8 +28,13 @@ async function ensureDefaultUnit() {
 }
 
 async function ensureAdmin() {
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "admin123";
+  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? "").trim().toLowerCase();
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "";
+  if (!adminEmail || adminPassword.length < 8) {
+    throw new Error(
+      "Defina SEED_ADMIN_EMAIL e SEED_ADMIN_PASSWORD (mínimo 8 caracteres). Não há valores padrão.",
+    );
+  }
 
   const existing = await db
     .select({ id: schema.users.id })
@@ -55,7 +60,7 @@ async function ensureAdmin() {
     })
     .returning({ id: schema.users.id });
 
-  console.log(`> Admin criado: ${adminEmail} / ${adminPassword}`);
+  console.log(`> Admin criado: ${adminEmail}`);
   return { id: created.id, email: adminEmail, password: adminPassword };
 }
 
@@ -87,6 +92,12 @@ async function main() {
 
   console.log("🔗 Garantindo vínculo do admin com a unidade...");
   await ensureUserPrimaryUnit(admin.id, unitId);
+
+  if (process.env.SEED_SAMPLE_PRODUCTS !== "yes") {
+    console.log("> Produtos de exemplo ignorados (use SEED_SAMPLE_PRODUCTS=yes para criá-los).");
+    console.log("> Seed concluído.");
+    return;
+  }
 
   console.log("🌱 Garantindo produtos iniciais...");
   const initialProducts = [

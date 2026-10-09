@@ -222,7 +222,8 @@ export const inventoryMovements = pgTable(
   },
   (table) => ({
     imProductIdx: index("idx_im_product").on(table.productId),
-    imReqItemUnique: uniqueIndex("uq_im_req_item").on(table.refType, table.requestItemId),
+    // não-único: um item pode ter vários movimentos (entregas parciais e estornos)
+    imRefIdx: index("idx_im_ref").on(table.refType, table.requestItemId),
   }),
 );
 

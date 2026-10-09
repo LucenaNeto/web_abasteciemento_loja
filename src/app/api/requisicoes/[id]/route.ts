@@ -2,22 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { RequestStatus } from "@/server/db/schema";
+import {
+  ApiError,
+  applyDeliveries,
+  lockRequest,
+  requestStatusFromItems,
+  userHasUnit,
+} from "@/server/requests/delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// Helper: Verifica se usuário tem acesso à unidade
-async function userHasUnit(userId: number, unitId: number) {
-  const [row] = await db
-    .select({ ok: sql<number>`1` })
-    .from(schema.userUnits)
-    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.unitId, unitId)))
-    .limit(1);
-
-  return !!row;
-}
 
 // ---------- GET /api/requisicoes/:id ----------
 export async function GET(
@@ -52,7 +48,7 @@ export async function GET(
     if (!reqRow.unitId) {
       return NextResponse.json({ error: "Requisição sem unidade." }, { status: 400 });
     }
-    const allowed = await userHasUnit(meId, reqRow.unitId);
+    const allowed = await userHasUnit(db, meId, reqRow.unitId);
     if (!allowed) {
       return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
     }
@@ -102,11 +98,14 @@ export async function GET(
 }
 
 // ---------- PATCH /api/requisicoes/:id ----------
-// Body permite: status opcional, assignToMe, items (para definir entregas) e note
+// Body permite: status opcional, assignToMe, items (para definir entregas) e note.
+// Estoque insuficiente devolve 409 (code INSUFFICIENT_STOCK); reenviar com
+// confirmInsufficientStock: true para entregar mesmo assim.
 const patchSchema = z.object({
   status: z.enum(["in_progress", "completed", "cancelled"]).optional(),
   assignToMe: z.boolean().optional().default(false),
   note: z.string().optional(),
+  confirmInsufficientStock: z.boolean().optional().default(false),
   items: z
     .array(
       z.object({
@@ -144,178 +143,62 @@ export async function PATCH(
     );
   }
 
-  const userId = Number((guard.session.user as any).id) || null;
+  const sessionUser = guard.session.user as any;
+  const role = String(sessionUser?.role ?? "");
+  const userId = Number(sessionUser?.id) || null;
 
   try {
-    const updated = await withTransaction(async (tx) => {
-      // 1) Carrega a requisição
-      const [reqRow] = await tx.select().from(schema.requests).where(eq(schema.requests.id, requestId)).limit(1);
+    const result = await withTransaction(async (tx) => {
+      // 1) Trava a requisição: dois atendimentos simultâneos não se atropelam
+      const reqRow = await lockRequest(tx, requestId);
       if (!reqRow) throw new ApiError(404, "Requisição não encontrada");
       if (reqRow.status === "cancelled")
         throw new ApiError(400, "Requisição cancelada não pode ser alterada");
 
-      // ✅ Validação de acesso à unidade (PATCH)
-      const sessionUser = guard.session.user as any;
-      const role = String(sessionUser?.role ?? "");
-
+      // 2) Acesso à unidade
       if (role !== "admin") {
         if (!reqRow.unitId) throw new ApiError(400, "Requisição sem unidade.");
         if (!userId) throw new ApiError(401, "Sessão inválida.");
-        const allowed = await userHasUnit(userId, reqRow.unitId);
-        if (!allowed) throw new ApiError(403, "Sem acesso a esta unidade.");
+        if (!(await userHasUnit(tx, userId, reqRow.unitId)))
+          throw new ApiError(403, "Sem acesso a esta unidade.");
       }
 
-      // 2) Carrega itens + produto (para estoque)
-      const itemsRows = await tx
-        .select({
-          itemId: schema.requestItems.id,
-          productId: schema.requestItems.productId,
-          requestedQty: schema.requestItems.requestedQty,
-          deliveredQtyPrev: schema.requestItems.deliveredQty,
-          itemStatusPrev: schema.requestItems.status,
-          sku: schema.products.sku,
-          name: schema.products.name,
-          unit: schema.products.unit,
-          stock: schema.products.stock,
-        })
+      // 3) Alvos de entrega (por id do item ou por productId)
+      const itemRows = await tx
+        .select({ id: schema.requestItems.id, productId: schema.requestItems.productId })
         .from(schema.requestItems)
-        .innerJoin(schema.products, eq(schema.requestItems.productId, schema.products.id))
         .where(eq(schema.requestItems.requestId, requestId));
 
-      if (itemsRows.length === 0) throw new ApiError(400, "Requisição sem itens");
-
-      // 3) Normaliza itens do body em mapa <requestItemId, deliveredFinal>
-      const incoming = new Map<number, number>();
-      if (Array.isArray(payload.items)) {
-        for (const it of payload.items) {
-          if (it?.id != null) {
-            const q = Math.max(0, Number(it.deliveredQty ?? 0) | 0);
-            incoming.set(it.id, q);
-          }
-        }
-        // Se veio por productId, converte agora
-        for (const it of payload.items) {
-          if (it?.productId && it?.id == null) {
-            const row = itemsRows.find((r) => r.productId === it.productId);
-            if (row) incoming.set(row.itemId, Math.max(0, Number(it.deliveredQty ?? 0) | 0));
-          }
-        }
+      const targets = new Map<number, number>();
+      for (const it of payload.items ?? []) {
+        const itemId = it.id ?? itemRows.find((r) => r.productId === it.productId)?.id;
+        if (itemId != null) targets.set(itemId, it.deliveredQty);
       }
 
-      // 4) Planeja: delivered final, delta de saída e validações
+      // 4) Entrega + movimentos + estoque (regra única)
       const wantCompleted = payload.status === "completed";
-      const plan = itemsRows.map((r) => {
-        const provided = incoming.get(r.itemId);
-        const deliveredTarget =
-          provided != null
-            ? Math.min(r.requestedQty, provided)
-            : wantCompleted
-            ? r.requestedQty
-            : r.deliveredQtyPrev;
-
-        const moveDelta = Math.max(0, deliveredTarget - r.deliveredQtyPrev); // só o que falta sair
-        return {
-          itemId: r.itemId,
-          productId: r.productId,
-          requested: r.requestedQty,
-          deliveredPrev: r.deliveredQtyPrev,
-          deliveredFinal: deliveredTarget,
-          moveDelta,
-        };
+      const { plan, warnings } = await applyDeliveries(tx, {
+        requestId,
+        targets,
+        completeRest: wantCompleted,
+        userId,
+        allowInsufficientStock: payload.confirmInsufficientStock,
       });
 
       if (wantCompleted) {
-        const allFull = plan.every((p) => p.deliveredFinal >= p.requested);
-        if (!allFull)
+        const open = plan.filter((p) => p.status !== "cancelled" && p.deliveredFinal < p.requested);
+        if (open.length > 0)
           throw new ApiError(400, "Há itens com entrega parcial. Ajuste as quantidades para concluir.");
       }
 
-      // 5) Valida estoque suficiente (somado por produto)
-      const sumByProd = new Map<number, number>();
-      for (const p of plan) sumByProd.set(p.productId, (sumByProd.get(p.productId) ?? 0) + p.moveDelta);
+      // 5) Status final da requisição
+      const nextStatus: RequestStatus =
+        payload.status ??
+        requestStatusFromItems(
+          plan.map((p) => p.status),
+          reqRow.status as RequestStatus,
+        );
 
-      if (sumByProd.size > 0) {
-        const prodIds = Array.from(sumByProd.keys());
-        const prods = await tx
-          .select({
-            id: schema.products.id,
-            stock: schema.products.stock,
-            sku: schema.products.sku,
-            name: schema.products.name,
-          })
-          .from(schema.products)
-          .where(inArray(schema.products.id, prodIds));
-
-        const stocks = new Map(prods.map((p) => [p.id, p.stock]));
-        for (const [pid, outQty] of sumByProd.entries()) {
-          if (outQty <= 0) continue;
-          const available = stocks.get(pid) ?? 0;
-          if (available < outQty) {
-            const p = prods.find((x) => x.id === pid);
-            throw new ApiError(
-              400,
-              `Estoque insuficiente para ${p?.sku ?? pid}: pedido saída ${outQty}, disponível ${available}.`,
-            );
-          }
-        }
-      }
-
-      // 6) Aplica: atualiza itens, cria movimentos (idempotente) e abate estoque
-      for (const p of plan) {
-        // status do item
-        const newItemStatus =
-          p.deliveredFinal <= 0 ? "pending" : p.deliveredFinal < p.requested ? "partial" : "delivered";
-
-        await tx
-          .update(schema.requestItems)
-          .set({
-            deliveredQty: p.deliveredFinal,
-            status: newItemStatus as any,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.requestItems.id, p.itemId));
-
-        // movimento + estoque
-        if (p.moveDelta > 0) {
-          try {
-            await tx.insert(schema.inventoryMovements).values({
-              productId: p.productId,
-              qty: p.moveDelta,
-              type: "out",
-              refType: "request",
-              refId: requestId,
-              requestItemId: p.itemId,
-              note: `Saída por requisição #${requestId} (item ${p.itemId})`,
-              createdByUserId: userId,
-            });
-          } catch {
-            // unique (refType, requestItemId) — se já existir, ignora
-          }
-
-          await tx
-            .update(schema.products)
-            .set({
-              stock: sql`${schema.products.stock} - ${p.moveDelta}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.products.id, p.productId));
-        }
-      }
-
-      // 7) Define status final da requisição
-      let nextStatus =
-        (payload.status as RequestStatus | undefined) ?? (reqRow.status as RequestStatus);
-      if (payload.status === "completed") {
-        nextStatus = "completed";
-      } else if (payload.status === "in_progress") {
-        nextStatus = "in_progress";
-      } else if (!payload.status) {
-        const allDelivered = plan.every((p) => p.deliveredFinal >= p.requested);
-        const anyDelivered = plan.some((p) => p.deliveredFinal > 0);
-        nextStatus = allDelivered ? "completed" : anyDelivered ? "in_progress" : "pending";
-      }
-
-      // 8) Atualiza requisição (status/nota/assignee)
       const patchReq: Partial<typeof schema.requests.$inferInsert> = {
         status: nextStatus,
         updatedAt: new Date(),
@@ -325,51 +208,47 @@ export async function PATCH(
 
       await tx.update(schema.requests).set(patchReq).where(eq(schema.requests.id, requestId));
 
-      // 9) Auditoria simples
+      // 6) Auditoria
       await tx.insert(schema.auditLogs).values({
         tableName: "requests",
         action: "STATUS_CHANGE",
         recordId: String(requestId),
         userId,
         payload: JSON.stringify({
+          from: reqRow.status,
           to: nextStatus,
           note: payload.note ?? undefined,
+          stockWarningsConfirmed: warnings.length ? warnings : undefined,
           items: plan.map((p) => ({
             itemId: p.itemId,
             deliveredFinal: p.deliveredFinal,
-            moveDelta: p.moveDelta,
+            delta: p.delta,
           })),
         }),
       });
 
-      // 10) Retorna a requisição atualizada
       const [after] = await tx
         .select()
         .from(schema.requests)
         .where(eq(schema.requests.id, requestId))
         .limit(1);
 
-      return after;
+      return { after, warnings };
     });
 
-    return NextResponse.json({ data: updated });
+    return NextResponse.json({ data: result.after, warnings: result.warnings });
   } catch (e: any) {
-    const status = e instanceof ApiError ? e.status : 500;
-    const msg = e instanceof ApiError ? e.message : String(e?.message ?? e);
-    return NextResponse.json({ error: msg }, { status });
+    if (e instanceof ApiError) {
+      return NextResponse.json(
+        { error: e.message, code: e.code, ...(e.extra ?? {}) },
+        { status: e.status },
+      );
+    }
+    console.error("PATCH /api/requisicoes/:id error:", e);
+    return NextResponse.json({ error: "Erro interno ao atualizar a requisição." }, { status: 500 });
   }
 }
 
-// Utilitário simples p/ lançar HTTP errors dentro da tx
-class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-// Converte ApiError para resposta adequada
 export async function POST() {
   return NextResponse.json({ error: "Method Not Allowed" }, { status: 405 });
 }

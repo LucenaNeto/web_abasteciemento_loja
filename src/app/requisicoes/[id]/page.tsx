@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { patchWithStockConfirm } from "@/lib/patchWithStockConfirm";
 
 type ReqStatus = "pending" | "in_progress" | "completed" | "cancelled";
 type ItemStatus = "pending" | "partial" | "delivered" | "cancelled";
@@ -100,10 +101,8 @@ export default function ReqDetailPage() {
 
   async function conclude() {
     if (!canOperate || !data) return;
-    const r = await fetch(`/api/requisicoes/${data.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "completed" }),
+    const r = await patchWithStockConfirm(`/api/requisicoes/${data.id}`, {
+      status: "completed",
     });
     if (!r.ok)
       return alert(
@@ -122,10 +121,8 @@ export default function ReqDetailPage() {
     }
     setSavingRow(itemId);
     try {
-      const r = await fetch(`/api/requisicoes/itens/${itemId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deliveredQty: qty }),
+      const r = await patchWithStockConfirm(`/api/requisicoes/itens/${itemId}`, {
+        deliveredQty: qty,
       });
       const j = await safeJson(r);
       if (!r.ok) {
