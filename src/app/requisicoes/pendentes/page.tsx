@@ -134,7 +134,7 @@ async function atender(id: number) {
 
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Fila — Pendentes</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Fila — Pendentes</h1>
             <p className="text-sm text-gray-600">
               Atenda as requisições marcando como <em>em progresso</em> e depois conclua no detalhe.
             </p>

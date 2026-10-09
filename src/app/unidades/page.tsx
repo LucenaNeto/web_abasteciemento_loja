@@ -132,7 +132,7 @@ export default function UnidadesPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Unidades</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Unidades</h1>
             <p className="text-sm text-gray-500">
               Crie novas unidades e ative/desative.
             </p>

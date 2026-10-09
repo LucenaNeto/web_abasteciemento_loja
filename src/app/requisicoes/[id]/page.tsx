@@ -188,7 +188,7 @@ export default function ReqDetailPage() {
           <>
             <header className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-semibold text-gray-900">
+                <h1 className="text-2xl font-semibold tracking-tight text-brand-950">
                   Requisição #{data.id}
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600">

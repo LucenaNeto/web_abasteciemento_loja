@@ -11,7 +11,7 @@ export default function ForbiddenPage() {
           ⛔
         </div>
 
-        <h1 className="mt-4 text-2xl font-semibold text-gray-900">Acesso negado</h1>
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-brand-950">Acesso negado</h1>
         <p className="mt-2 text-sm text-gray-600">
           Você não tem permissão para acessar esta página. Verifique seu perfil de acesso
           (Admin, Loja ou Almoxarifado).

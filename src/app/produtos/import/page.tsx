@@ -164,7 +164,7 @@ export default function ImportProdutosPage() {
           </Link>
         </div>
 
-        <h1 className="text-2xl font-semibold text-gray-900">Importar Produtos (CSV/Excel)</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Importar Produtos (CSV/Excel)</h1>
         <p className="text-sm text-gray-600">
           Aceita <code>.csv</code>, <code>.xlsx</code> ou <code>.xls</code>. Cabeçalhos reconhecidos:
           <code> sku, name (ou nome/descrição), unit (unidade), isActive (ativo)</code>.

@@ -119,7 +119,7 @@ export default function ProdutosPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Produtos</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Produtos</h1>
             <p className="text-sm text-gray-500">
               Cadastre e pesquise SKUs.
               {isAdmin ? " Você tem permissão para criar/editar." : ""}

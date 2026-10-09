@@ -51,7 +51,7 @@ export async function middleware(req: NextRequest) {
   // ---------- Regras de acesso por rota ----------
 
   // Admin-only
-  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria"];
+  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria", "/relatorios"];
   if (adminOnly.some((p) => pathname.startsWith(p))) {
     if (role !== "admin") return deny(req);
   }

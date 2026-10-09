@@ -38,6 +38,18 @@ export default function RequisicoesPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
 
+  // atalhos da tela inicial: /requisicoes?status=in_progress&createdBy=me
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const s = sp.get("status");
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (s && ["pending", "in_progress", "completed", "cancelled"].includes(s)) {
+      setStatusFilter(s as "pending" | "in_progress" | "completed" | "cancelled");
+    }
+    if (sp.get("createdBy") === "me") setCreatedBy("me");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
   // dados
   const [rows, setRows] = useState<Req[]>([]);
   const [total, setTotal] = useState(0);
@@ -131,7 +143,7 @@ export default function RequisicoesPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Requisições</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Requisições</h1>
             <p className="text-sm text-gray-500">
               Fluxo: criar → atender → finalizar.{" "}
               <Link href="/produtos" className="underline">

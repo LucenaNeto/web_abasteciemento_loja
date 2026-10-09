@@ -358,7 +358,7 @@ export default function UsuariosPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Usuários</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Usuários</h1>
             <p className="text-sm text-gray-500">Gerencie acesso: nome, papel, status, senha e unidades.</p>
           </div>
           <button

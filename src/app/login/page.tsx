@@ -54,7 +54,7 @@ export default function LoginPage() {
           <BrandLogo showText />
         </div>
 
-        <h1 className="text-center text-2xl font-semibold text-gray-900">
+        <h1 className="text-center text-2xl font-semibold tracking-tight text-brand-950">
           Acessar o Sistema
         </h1>
         <p className="mt-2 text-center text-sm text-gray-500">
