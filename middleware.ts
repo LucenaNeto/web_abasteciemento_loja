@@ -51,7 +51,8 @@ export async function middleware(req: NextRequest) {
   // ---------- Regras de acesso por rota ----------
 
   // Admin-only
-  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria", "/relatorios"];
+  // (o dashboard em /relatorios é liberado para todos; só o relatório simples continua restrito)
+  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria", "/relatorios/requisicoes"];
   if (adminOnly.some((p) => pathname.startsWith(p))) {
     if (role !== "admin") return deny(req);
   }

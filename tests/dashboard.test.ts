@@ -26,11 +26,47 @@ const get = async (qs = "") => {
 };
 
 describe("dashboard", () => {
-  it("exige admin", async () => {
+  it("exige login; admin, loja e almoxarifado podem abrir", async () => {
     loginAs(null);
     expect((await get()).res.status).toBe(401);
     loginAs(w.warehouse.id, "warehouse");
-    expect((await get()).res.status).toBe(403);
+    expect((await get()).res.status).toBe(200);
+    loginAs(w.store.id, "store");
+    expect((await get()).res.status).toBe(200);
+  });
+
+  it("não-admin só enxerga as próprias unidades", async () => {
+    // mundo próprio: não interfere nas contagens dos outros testes deste arquivo
+    const s = await createWorld();
+    try {
+      const p = await createProduct(s, 5);
+      await createRequest(s, [{ productId: p.id, qty: 1 }]);
+
+      // sem unitId: loja vê só a unidade vinculada a ela (nunca as ~10 unidades reais da base)
+      loginAs(s.store.id, "store");
+      let { res, body } = await get();
+      expect(res.status).toBe(200);
+      expect(body.byUnit.map((u: { unitId: number }) => u.unitId)).toEqual([s.unit.id]);
+      expect(body.kpis.total).toBe(1);
+
+      // unidade em que não tem vínculo: 403
+      ({ res } = await get(`unitId=${s.otherUnit.id}`));
+      expect(res.status).toBe(403);
+
+      // usuário sem nenhuma unidade vinculada: dashboard vazio (e não o da empresa toda)
+      loginAs(s.outsider.id, "warehouse");
+      ({ res, body } = await get());
+      expect(res.status).toBe(200);
+      expect(body.kpis.total).toBe(0);
+      expect(body.byUnit).toEqual([]);
+
+      // admin continua vendo tudo
+      loginAs(s.admin.id, "admin");
+      ({ res, body } = await get("from=2025-11-01&to=2026-12-01"));
+      expect(body.byUnit.length).toBeGreaterThan(1);
+    } finally {
+      await destroyWorld(s);
+    }
   });
 
   it("valida parâmetros", async () => {

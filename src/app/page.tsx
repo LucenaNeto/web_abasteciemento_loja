@@ -46,7 +46,7 @@ export default function Home() {
     { href: "/requisicoes/pendentes", title: "Fila de pendentes", desc: "Atender o que está aguardando.", icon: "inbox", roles: ["admin", "warehouse"] },
     { href: "/requisicoes", title: "Requisições", desc: "Acompanhar status e histórico.", icon: "list" },
     { href: "/produtos", title: "Produtos", desc: "Consultar e cadastrar SKUs.", icon: "box" },
-    { href: "/relatorios", title: "Dashboard", desc: "Indicadores por unidade e usuário.", icon: "chart", roles: ["admin"] },
+    { href: "/relatorios", title: "Dashboard", desc: "Indicadores por unidade e usuário.", icon: "chart" },
     { href: "/auditoria", title: "Auditoria", desc: "Rastreabilidade das ações.", icon: "shield", roles: ["admin"] },
   ];
 

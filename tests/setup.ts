@@ -9,3 +9,6 @@ if ((process.env.APP_ENV ?? "").toLowerCase() !== "homolog") {
     "[tests] APP_ENV precisa ser 'homolog' (.env.local). Testes de integração nunca rodam em produção.",
   );
 }
+
+// Os testes de estoque exigem o controle de estoque ligado (em produção o padrão é desligado).
+process.env.STOCK_CONTROL = "on";

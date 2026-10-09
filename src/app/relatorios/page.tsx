@@ -104,13 +104,14 @@ export default function DashboardPage() {
     setFrom(addDays(t, -29));
   }, []);
 
+  // admin vê todas as unidades; os demais perfis recebem só as unidades vinculadas a eles
   useEffect(() => {
-    if (!isAdmin) return;
+    if (status !== "authenticated") return;
     fetch("/api/units?active=all", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => setUnits(j?.data ?? []))
       .catch(() => undefined);
-  }, [isAdmin]);
+  }, [status]);
 
   const load = useCallback(async () => {
     if (!from || !to) return;
@@ -131,8 +132,8 @@ export default function DashboardPage() {
   }, [from, to, unitId]);
 
   useEffect(() => {
-    if (status === "authenticated" && isAdmin) void load();
-  }, [status, isAdmin, load]);
+    if (status === "authenticated") void load();
+  }, [status, load]);
 
   function quick(days: number) {
     const t = isoToday();
@@ -141,15 +142,6 @@ export default function DashboardPage() {
   }
 
   if (status === "loading") return <div className="p-6">Carregando…</div>;
-  if (!isAdmin) {
-    return (
-      <main className="p-6">
-        <Card className="mx-auto max-w-xl p-6 text-red-600">
-          Sem permissão. Apenas <strong>Admin</strong> acessa o dashboard.
-        </Card>
-      </main>
-    );
-  }
 
   const k = data?.kpis;
   const unitName = units.find((u) => String(u.id) === unitId);
@@ -164,9 +156,11 @@ export default function DashboardPage() {
             : "Carregando…"
         }
         actions={
-          <Link href="/relatorios/requisicoes" className="text-sm text-brand-700 underline">
-            Relatório simples
-          </Link>
+          isAdmin ? (
+            <Link href="/relatorios/requisicoes" className="text-sm text-brand-700 underline">
+              Relatório simples
+            </Link>
+          ) : undefined
         }
       />
 
