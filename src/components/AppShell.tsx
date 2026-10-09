@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { Icon, type IconName } from "./icons";
 import { NotificationBell, useNotifications } from "./notifications";
+import WhatsNew from "./WhatsNew";
 
 type Role = "admin" | "store" | "warehouse";
 
@@ -66,6 +67,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/";
   const { data: session, status } = useSession();
   const [open, setOpen] = useState(false);
+  const [noticeSignal, setNoticeSignal] = useState(0); // clique em "Novidades"
   // avisos + alerta sonoro (consulta periódica; só com usuário logado e fora do login/impressão)
   const showShell = !(pathname.startsWith("/login") || pathname.endsWith("/imprimir"));
   const notifications = useNotifications(showShell && status === "authenticated");
@@ -149,8 +151,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <button
+          onClick={() => setNoticeSignal((n) => n + 1)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm text-brand-200 hover:bg-brand-800"
+        >
+          <Icon name="bell" className="h-4 w-4" />
+          Novidades
+        </button>
+        <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-brand-700 px-3 py-1.5 text-sm text-brand-100 hover:bg-brand-800"
+          className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border border-brand-700 px-3 py-1.5 text-sm text-brand-100 hover:bg-brand-800"
         >
           <Icon name="logout" className="h-4 w-4" />
           Sair
@@ -186,6 +195,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="app-content">{children}</div>
+
+      <WhatsNew
+        role={role}
+        soundOn={notifications.soundOn}
+        onToggleSound={() => void notifications.toggleSound()}
+        openSignal={noticeSignal}
+      />
     </div>
   );
 }
