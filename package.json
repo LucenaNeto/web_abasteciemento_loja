@@ -12,7 +12,8 @@
     "lint": "eslint",
     "db:seed": "tsx src/server/db/seed.ts",
     "db:copy-prod": "tsx scripts/copy-prod-to-homolog.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:backup": "tsx scripts/backup-db.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
