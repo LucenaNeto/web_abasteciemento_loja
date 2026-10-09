@@ -27,11 +27,6 @@ export default async function Home() {
               Olá, <span className="font-medium">{user?.name}</span> — Papel: <span className="font-medium">{roleLabel}</span>
             </p>
           </div>
-          <nav className="text-sm text-gray-600">
-            <Link href="/api/auth/signout" className="underline">
-              Sair
-            </Link>
-          </nav>
         </header>
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

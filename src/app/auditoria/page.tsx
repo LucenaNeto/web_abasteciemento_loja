@@ -158,7 +158,7 @@ export default function AuditoriaPage() {
               />
             </div>
             <div className="sm:col-span-6">
-              <button onClick={resetAndReload} className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800">
+              <button onClick={resetAndReload} className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700">
                 Aplicar filtros
               </button>
             </div>

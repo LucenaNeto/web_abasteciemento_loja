@@ -140,7 +140,7 @@ export default function UnidadesPage() {
 
           <button
             onClick={() => setOpenNew(true)}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
           >
             Nova Unidade
           </button>
@@ -296,7 +296,7 @@ export default function UnidadesPage() {
               <button
                 onClick={createUnit}
                 disabled={savingNew}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+                className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
               >
                 {savingNew ? "Salvando..." : "Salvar"}
               </button>

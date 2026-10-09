@@ -142,7 +142,7 @@ export default function RequisicoesPage() {
           {canCreate && (
             <Link
               href="/requisicoes/nova"
-              className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+              className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
             >
               Nova Requisição
             </Link>
@@ -199,7 +199,7 @@ export default function RequisicoesPage() {
             <div>
               <button
                 onClick={resetAndReload}
-                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+                className="w-full rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
               >
                 Aplicar filtros
               </button>

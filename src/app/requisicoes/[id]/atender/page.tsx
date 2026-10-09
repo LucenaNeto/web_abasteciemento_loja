@@ -372,7 +372,7 @@ export default function AtenderRequisicaoPage() {
             onClick={concluir}
             // CORRIGIDO: de 'items' para 'req.items'
             disabled={saving || !req.items || req.items.length === 0}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
             title="Concluir requisição (exige 100% entregue)"
           >
             {saving ? "Concluindo..." : "Concluir requisição"}

@@ -45,7 +45,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+    <main className="flex min-h-screen items-center justify-center bg-surface p-4">
       {/* Card com borda e sombra suave */}
       <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm">
         
@@ -75,7 +75,7 @@ export default function LoginPage() {
             <input
               type="email"
               autoComplete="email"
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
@@ -90,7 +90,7 @@ export default function LoginPage() {
             <input
               type="password"
               autoComplete="current-password"
-              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-gray-900/10"
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
@@ -101,7 +101,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 w-full rounded-xl bg-gray-900 px-4 py-2.5 font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+            className="mt-2 w-full rounded-xl bg-brand-800 px-4 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
           >
             {loading ? "Entrando..." : "Entrar"}
           </button>

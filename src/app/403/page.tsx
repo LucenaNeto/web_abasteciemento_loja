@@ -26,7 +26,7 @@ export default function ForbiddenPage() {
           </Link>
           <a
             href="/login"
-            className="rounded-xl bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-sm text-white hover:bg-brand-700"
           >
             Entrar com outra conta
           </a>
