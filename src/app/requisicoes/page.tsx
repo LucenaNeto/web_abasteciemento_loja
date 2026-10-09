@@ -14,6 +14,7 @@ type Req = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  unavailableCount?: number;
 };
 
 type ListResp = {
@@ -267,6 +268,14 @@ export default function RequisicoesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <Badge status={r.status} />
+                        {r.unavailableCount ? (
+                          <div
+                            className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-800"
+                            title="Há item(ns) sem estoque no almoxarifado"
+                          >
+                            ⚠ {r.unavailableCount} sem estoque
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3">{r.note || "-"}</td>
                       <td className="px-4 py-3">{formatDate(r.createdAt)}</td>

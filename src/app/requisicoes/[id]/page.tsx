@@ -8,7 +8,7 @@ import Link from "next/link";
 import { patchWithStockConfirm } from "@/lib/patchWithStockConfirm";
 
 type ReqStatus = "pending" | "in_progress" | "completed" | "cancelled";
-type ItemStatus = "pending" | "partial" | "delivered" | "cancelled";
+type ItemStatus = "pending" | "partial" | "delivered" | "cancelled" | "unavailable";
 type Criticality = "cashier" | "service" | "restock";
 
 type Req = {
@@ -34,6 +34,7 @@ type ReqDetail = Req & {
     requestedQty: number;
     deliveredQty: number;
     status: ItemStatus;
+    statusNote?: string | null;
     productSku: string | null;
     productName: string | null;
     productUnit: string | null;
@@ -332,6 +333,11 @@ export default function ReqDetailPage() {
                             </td>
                             <td className="px-4 py-3">
                               <SmallBadge status={it.status} />
+                              {it.status === "unavailable" && it.statusNote ? (
+                                <div className="mt-1 max-w-[16rem] text-xs text-gray-600">
+                                  {it.statusNote}
+                                </div>
+                              ) : null}
                             </td>
                             <td className="px-4 py-3">
                               {editable ? (
@@ -423,6 +429,7 @@ function SmallBadge({ status }: { status: ItemStatus }) {
     partial: "bg-blue-100 text-blue-800",
     delivered: "bg-green-100 text-green-800",
     cancelled: "bg-red-100 text-red-800",
+    unavailable: "bg-orange-100 text-orange-800",
   };
   return (
     <span
@@ -434,6 +441,8 @@ function SmallBadge({ status }: { status: ItemStatus }) {
         ? "Parcial"
         : status === "delivered"
         ? "Entregue"
+        : status === "unavailable"
+        ? "Sem estoque"
         : "Cancelado"}
     </span>
   );
