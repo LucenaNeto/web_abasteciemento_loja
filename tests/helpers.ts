@@ -63,7 +63,7 @@ export async function createWorld() {
     { userId: warehouse.id, unitId: unit.id, isPrimary: true },
   ]);
 
-  return { tag, unit, otherUnit, admin, store, warehouse, outsider };
+  return { tag, unit, otherUnit, admin, store, warehouse, outsider, extraUserIds: [] as number[] };
 }
 
 export type World = Awaited<ReturnType<typeof createWorld>>;
@@ -114,7 +114,7 @@ export async function requestOf(id: number) {
 /** Remove tudo que a fixture criou (e só isso). */
 export async function destroyWorld(w: World) {
   const unitIds = [w.unit.id, w.otherUnit.id];
-  const userIds = [w.admin.id, w.store.id, w.warehouse.id, w.outsider.id];
+  const userIds = [w.admin.id, w.store.id, w.warehouse.id, w.outsider.id, ...w.extraUserIds];
 
   const prods = await db.select({ id: schema.products.id }).from(schema.products).where(inArray(schema.products.unitId, unitIds));
   const prodIds = prods.map((p) => p.id);
@@ -134,6 +134,11 @@ export async function destroyWorld(w: World) {
       ),
     );
   }
+  if (prodIds.length) {
+    await db.delete(schema.auditLogs).where(and(eq(schema.auditLogs.tableName, "products"), inArray(schema.auditLogs.recordId, prodIds.map(String))));
+  }
+  await db.delete(schema.auditLogs).where(and(eq(schema.auditLogs.tableName, "units"), inArray(schema.auditLogs.recordId, unitIds.map(String))));
+  await db.delete(schema.auditLogs).where(and(eq(schema.auditLogs.tableName, "users"), inArray(schema.auditLogs.recordId, userIds.map(String))));
   if (prodIds.length) await db.delete(schema.inventoryMovements).where(inArray(schema.inventoryMovements.productId, prodIds));
   if (reqIds.length) await db.delete(schema.requests).where(inArray(schema.requests.id, reqIds));
   if (prodIds.length) await db.delete(schema.products).where(inArray(schema.products.id, prodIds));

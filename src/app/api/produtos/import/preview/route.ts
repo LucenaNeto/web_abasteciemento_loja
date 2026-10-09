@@ -4,8 +4,9 @@ import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { z } from "zod";
 import { ensureRoleApi } from "@/server/auth/rbac";
+import { findExistingSkus, MAX_IMPORT_BYTES } from "@/server/import/existing-skus";
 import { db, schema } from "@/server/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,13 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: `Nenhum arquivo encontrado. Chaves recebidas: ${keys.join(", ")}` },
       { status: 400 },
+    );
+  }
+
+  if (typeof (filePart as any).size === "number" && (filePart as any).size > MAX_IMPORT_BYTES) {
+    return NextResponse.json(
+      { error: `Arquivo muito grande (máx. ${MAX_IMPORT_BYTES / 1024 / 1024} MB).` },
+      { status: 413 },
     );
   }
 
@@ -148,17 +156,12 @@ export async function POST(req: Request) {
   }
 
   // ✅ checa existência no banco POR UNIDADE (unitId + sku)
-  const skus = cleaned.map((c) => c.row.sku);
-  const existing = await db
-    .select({ sku: schema.products.sku })
-    .from(schema.products)
-    .where(and(eq(schema.products.unitId, unitId), inArray(schema.products.sku, skus)));
-
-  const existingSet = new Set(existing.map((p) => p.sku.toUpperCase()));
+  const existing = await findExistingSkus(unitId, cleaned.map((c) => c.row.sku));
+  const existingSet = new Set(existing.keys());
 
   const total = cleaned.length;
   const uniqueSkus = seen.size;
-  const alreadyExists = cleaned.filter((c) => existingSet.has(c.row.sku.toUpperCase())).length;
+  const alreadyExists = cleaned.filter((c) => existingSet.has(c.row.sku.toLowerCase())).length;
 
   const sample = cleaned.slice(0, 20).map((c) => ({ line: c.line, ...c.row }));
 

@@ -16,12 +16,10 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.4.1",
-    "csv": "^6.4.1",
+    "csv-parse": "^7.0.3",
     "drizzle-orm": "^0.45.4",
     "next": "^16.4.0",
     "next-auth": "^4.24.15",
-    "parse": "^7.0.2",
     "pg": "^8.16.3",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
@@ -31,7 +29,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/pg": "^8.15.6",
     "@types/react": "^19",

@@ -10,6 +10,7 @@ import {
   lockRequest,
   requestStatusFromItems,
   userHasUnit,
+  type StockWarning,
 } from "@/server/requests/delivery";
 
 export const runtime = "nodejs";
@@ -155,6 +156,23 @@ export async function PATCH(
       if (reqRow.status === "cancelled")
         throw new ApiError(400, "Requisição cancelada não pode ser alterada");
 
+      // Concluída é final: só um admin pode reabrir (status in_progress). Repetir
+      // "concluir" é inofensivo (idempotente) e não mexe em nada.
+      if (reqRow.status === "completed") {
+        const hasItems = (payload.items?.length ?? 0) > 0;
+        if (payload.status === "completed" && !hasItems) {
+          return { after: reqRow, warnings: [] as StockWarning[] };
+        }
+        const isAdminReopen = role === "admin" && payload.status === "in_progress" && !hasItems;
+        if (!isAdminReopen) {
+          throw new ApiError(
+            400,
+            "Requisição concluída não pode ser alterada. Um administrador pode reabri-la.",
+            "REQUEST_COMPLETED",
+          );
+        }
+      }
+
       // 2) Acesso à unidade
       if (role !== "admin") {
         if (!reqRow.unitId) throw new ApiError(400, "Requisição sem unidade.");
@@ -189,6 +207,18 @@ export async function PATCH(
         const open = plan.filter((p) => p.status !== "cancelled" && p.deliveredFinal < p.requested);
         if (open.length > 0)
           throw new ApiError(400, "Há itens com entrega parcial. Ajuste as quantidades para concluir.");
+      }
+
+      // Cancelar com itens já entregues deixaria o estoque inconsistente:
+      // primeiro estorne as entregas (quantidade volta a 0).
+      if (payload.status === "cancelled") {
+        const delivered = plan.filter((p) => p.status !== "cancelled" && p.deliveredFinal > 0);
+        if (delivered.length > 0)
+          throw new ApiError(
+            400,
+            "Há itens já entregues. Zere as quantidades entregues (estorno) antes de cancelar.",
+            "HAS_DELIVERED_ITEMS",
+          );
       }
 
       // 5) Status final da requisição
