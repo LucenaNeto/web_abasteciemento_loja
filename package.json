@@ -10,7 +10,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "lint": "eslint",
-    "db:seed": "tsx src/server/db/seed.ts"
+    "db:seed": "tsx src/server/db/seed.ts",
+    "db:copy-prod": "tsx scripts/copy-prod-to-homolog.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
