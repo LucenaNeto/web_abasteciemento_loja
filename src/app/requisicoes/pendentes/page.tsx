@@ -134,7 +134,7 @@ async function atender(id: number) {
 
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Fila — Pendentes</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Fila — Pendentes</h1>
             <p className="text-sm text-gray-600">
               Atenda as requisições marcando como <em>em progresso</em> e depois conclua no detalhe.
             </p>
@@ -243,6 +243,14 @@ async function atender(id: number) {
                           title="Abrir detalhes (concluir e informar quantidades)"
                         >
                           Abrir
+                        </Link>
+                        <Link
+                          href={`/requisicoes/${r.id}/imprimir?formato=a4`}
+                          target="_blank"
+                          className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                          title="Imprimir lista de separação"
+                        >
+                          Imprimir
                         </Link>
                       </td>
                     </tr>

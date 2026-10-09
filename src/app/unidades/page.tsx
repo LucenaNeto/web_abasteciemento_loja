@@ -132,7 +132,7 @@ export default function UnidadesPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Unidades</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Unidades</h1>
             <p className="text-sm text-gray-500">
               Crie novas unidades e ative/desative.
             </p>
@@ -140,7 +140,7 @@ export default function UnidadesPage() {
 
           <button
             onClick={() => setOpenNew(true)}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
           >
             Nova Unidade
           </button>
@@ -296,7 +296,7 @@ export default function UnidadesPage() {
               <button
                 onClick={createUnit}
                 disabled={savingNew}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+                className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
               >
                 {savingNew ? "Salvando..." : "Salvar"}
               </button>

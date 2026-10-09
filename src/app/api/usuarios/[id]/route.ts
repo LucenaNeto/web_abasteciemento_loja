@@ -2,9 +2,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { db, schema } from "@/server/db";
+import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,6 +91,16 @@ export async function PATCH(
   const [current] = await db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1);
   if (!current) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
 
+  const adminId = Number((guard.session.user as any).id);
+
+  // Ninguém tira o próprio acesso de admin por aqui
+  if (id === adminId && (payload.isActive === false || (payload.role != null && payload.role !== "admin"))) {
+    return NextResponse.json(
+      { error: "Você não pode desativar nem rebaixar a si mesmo." },
+      { status: 400 },
+    );
+  }
+
   // Monta patch
   const patch: Partial<typeof schema.users.$inferInsert> = {};
   if (payload.name != null) patch.name = payload.name;
@@ -104,42 +114,66 @@ export async function PATCH(
     passwordChanged = true;
   }
 
-  // Atualiza
-  await db
-    .update(schema.users)
-    .set({ ...patch, updatedAt: new Date()})
-    .where(eq(schema.users.id, id));
+  const losesAdmin =
+    current.role === "admin" &&
+    current.isActive &&
+    (payload.isActive === false || (payload.role != null && payload.role !== "admin"));
 
-  // Auditoria (UPDATE)
-  const adminId = Number((guard.session.user as any).id);
-  await db.insert(schema.auditLogs).values({
-    tableName: "users",
-    action: "UPDATE",
-    recordId: String(id),
-    userId: Number.isFinite(adminId) ? adminId : null,
-    payload: JSON.stringify({
-      before: {
-        name: current.name,
-        role: current.role,
-        isActive: current.isActive,
-      },
-      after: {
-        name: payload.name ?? current.name,
-        role: payload.role ?? current.role,
-        isActive: payload.isActive ?? current.isActive,
-      },
-    }),
-  });
+  try {
+    await withTransaction(async (tx) => {
+      // Sempre sobra pelo menos 1 admin ativo (trava os admins para evitar corrida)
+      if (losesAdmin) {
+        const admins = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.role, "admin"), eq(schema.users.isActive, true)))
+          .for("update");
+        if (!admins.some((a) => a.id !== id)) {
+          throw new LastAdminError();
+        }
+      }
 
-  // Auditoria (PASSWORD_RESET) se necessário
-  if (passwordChanged) {
-    await db.insert(schema.auditLogs).values({
-      tableName: "users",
-      action: "PASSWORD_RESET",
-      recordId: String(id),
-      userId: Number.isFinite(adminId) ? adminId : null,
-      payload: JSON.stringify({ reason: "admin_update" }),
+      await tx
+        .update(schema.users)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(schema.users.id, id));
+
+      // Auditoria (UPDATE)
+      await tx.insert(schema.auditLogs).values({
+        tableName: "users",
+        action: "UPDATE",
+        recordId: String(id),
+        userId: Number.isFinite(adminId) ? adminId : null,
+        payload: JSON.stringify({
+          before: { name: current.name, role: current.role, isActive: current.isActive },
+          after: {
+            name: payload.name ?? current.name,
+            role: payload.role ?? current.role,
+            isActive: payload.isActive ?? current.isActive,
+          },
+        }),
+      });
+
+      // Auditoria (PASSWORD_RESET) se necessário
+      if (passwordChanged) {
+        await tx.insert(schema.auditLogs).values({
+          tableName: "users",
+          action: "PASSWORD_RESET",
+          recordId: String(id),
+          userId: Number.isFinite(adminId) ? adminId : null,
+          payload: JSON.stringify({ reason: "admin_update" }),
+        });
+      }
     });
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      return NextResponse.json(
+        { error: "Não é possível: este é o único administrador ativo." },
+        { status: 400 },
+      );
+    }
+    console.error("PATCH /api/usuarios/:id error:", err);
+    return NextResponse.json({ error: "Falha ao atualizar usuário" }, { status: 500 });
   }
 
   // Retorna o usuário atualizado (sem hash)
@@ -159,3 +193,5 @@ export async function PATCH(
 
   return NextResponse.json({ data: updated });
 }
+
+class LastAdminError extends Error {}

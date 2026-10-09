@@ -2,20 +2,27 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { eq, and, sql } from "drizzle-orm";
-import type { ItemStatus, RequestStatus } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
+import { notify } from "@/server/notifications";
+import type { RequestStatus } from "@/server/db/schema";
+import {
+  ApiError,
+  applyDeliveries,
+  itemStatusFor,
+  itemStatuses,
+  lockRequest,
+  requestStatusFromItems,
+  statusTimestamps,
+  userHasUnit,
+} from "@/server/requests/delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function userHasUnit(userId: number, unitId: number) {
-  const [row] = await db
-    .select({ ok: sql<number>`1` })
-    .from(schema.userUnits)
-    .where(and(eq(schema.userUnits.userId, userId), eq(schema.userUnits.unitId, unitId)))
-    .limit(1);
-
-  return !!row;
+function parseItemId(itemParam: string | string[]) {
+  const raw = Array.isArray(itemParam) ? itemParam[0] : itemParam ?? "";
+  const id = Number.parseInt(String(raw).trim(), 10);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 // -------- GET /api/requisicoes/itens/:itemId --------
@@ -27,16 +34,14 @@ export async function GET(
   if (!guard.ok) return guard.res;
 
   const { itemId: itemParam } = await params;
-  const raw = Array.isArray(itemParam) ? itemParam[0] : itemParam ?? "";
-  const id = Number.parseInt(String(raw).trim(), 10);
-  if (!Number.isFinite(id)) {
-    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  }
+  const id = parseItemId(itemParam);
+  if (!id) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const [row] = await db
     .select({
       id: schema.requestItems.id,
       requestId: schema.requestItems.requestId,
+      unitId: schema.requests.unitId,
       productId: schema.requestItems.productId,
       requestedQty: schema.requestItems.requestedQty,
       deliveredQty: schema.requestItems.deliveredQty,
@@ -46,20 +51,38 @@ export async function GET(
       productUnit: schema.products.unit,
     })
     .from(schema.requestItems)
+    .innerJoin(schema.requests, eq(schema.requests.id, schema.requestItems.requestId))
     .leftJoin(schema.products, eq(schema.products.id, schema.requestItems.productId))
     .where(eq(schema.requestItems.id, id))
     .limit(1);
 
   if (!row) return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
 
-  return NextResponse.json({ data: row });
+  // acesso por unidade (admin vê tudo)
+  const sessionUser = guard.session.user as any;
+  if (String(sessionUser?.role ?? "") !== "admin") {
+    const meId = Number(sessionUser?.id);
+    if (!Number.isFinite(meId)) {
+      return NextResponse.json({ error: "Sessão inválida (sem id)." }, { status: 401 });
+    }
+    if (!(await userHasUnit(db, meId, row.unitId))) {
+      return NextResponse.json({ error: "Sem acesso a esta unidade." }, { status: 403 });
+    }
+  }
+
+  const { unitId: _unitId, ...data } = row;
+  void _unitId;
+  return NextResponse.json({ data });
 }
 
 // -------- PATCH /api/requisicoes/itens/:itemId --------
-// Body: { deliveredQty?: number >= 0, status?: "pending" | "partial" | "delivered" | "cancelled" }
+// Body: { deliveredQty?: number >= 0, status?: "cancelled", confirmInsufficientStock?: boolean }
+// A quantidade entregue passa pela MESMA regra de baixa de estoque da rota da requisição.
 const patchSchema = z.object({
   deliveredQty: z.number().int().min(0).optional(),
-  status: z.enum(["pending", "partial", "delivered", "cancelled"]).optional(),
+  status: z.enum(["cancelled", "unavailable", "pending"]).optional(),
+  statusNote: z.string().trim().max(200).optional(),
+  confirmInsufficientStock: z.boolean().optional().default(false),
 });
 
 export async function PATCH(
@@ -70,11 +93,8 @@ export async function PATCH(
   if (!guard.ok) return guard.res;
 
   const { itemId: itemParam } = await params;
-  const raw = Array.isArray(itemParam) ? itemParam[0] : itemParam ?? "";
-  const id = Number.parseInt(String(raw).trim(), 10);
-  if (!Number.isFinite(id)) {
-    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
-  }
+  const id = parseItemId(itemParam);
+  if (!id) return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   let payload: z.infer<typeof patchSchema>;
   try {
@@ -86,147 +106,162 @@ export async function PATCH(
     );
   }
 
-  const userId = Number((guard.session.user as any).id);
+  const sessionUser = guard.session.user as any;
+  const role = String(sessionUser?.role ?? "");
+  const userIdNum = Number(sessionUser?.id);
+  const userId = Number.isFinite(userIdNum) ? userIdNum : null;
 
-  let updated;
   try {
-    updated = await withTransaction(async (tx) => {
-      // Busca item + request atual
-      const [currentItem] = await tx
+    const result = await withTransaction(async (tx) => {
+      const [item] = await tx
         .select()
         .from(schema.requestItems)
         .where(eq(schema.requestItems.id, id))
         .limit(1);
+      if (!item) throw new ApiError(404, "Item não encontrado");
 
-      if (!currentItem) throw new ApiError(404, "Item não encontrado");
-
-      const [currentReq] = await tx
-        .select()
-        .from(schema.requests)
-        .where(eq(schema.requests.id, currentItem.requestId))
-        .limit(1);
-
+      // trava a requisição do item (mesma ordem de lock da rota da requisição)
+      const currentReq = await lockRequest(tx, item.requestId);
       if (!currentReq) throw new ApiError(404, "Requisição não encontrada");
 
-      // ✅ BLOCO DE VALIDAÇÃO DE UNIDADE ADICIONADO AQUI
-      const sessionUser = guard.session.user as any;
-      const role = String(sessionUser?.role ?? "");
-
       if (role !== "admin") {
-        const allowed = await userHasUnit(userId, currentReq.unitId);
-        if (!allowed) throw new ApiError(403, "Sem acesso a esta unidade.");
+        if (!userId) throw new ApiError(401, "Sessão inválida.");
+        if (!(await userHasUnit(tx, userId, currentReq.unitId)))
+          throw new ApiError(403, "Sem acesso a esta unidade.");
       }
-      // --------------------------------------------------
 
       if (currentReq.status === "completed" || currentReq.status === "cancelled") {
         throw new ApiError(400, "Requisição já finalizada; não é possível alterar itens.");
       }
 
-      // Calcula novos valores do item
-      let deliveredQty = payload.deliveredQty ?? currentItem.deliveredQty;
-      if (!Number.isFinite(deliveredQty) || deliveredQty < 0) {
-        throw new ApiError(400, "Quantidade entregue inválida.");
+      // relê o item já com a requisição travada
+      const [cur] = await tx
+        .select()
+        .from(schema.requestItems)
+        .where(eq(schema.requestItems.id, id))
+        .limit(1);
+      if (!cur) throw new ApiError(404, "Item não encontrado");
+
+      let warnings: Awaited<ReturnType<typeof applyDeliveries>>["warnings"] = [];
+
+      if (payload.status === "cancelled") {
+        if (cur.deliveredQty > 0)
+          throw new ApiError(400, "Item com quantidade entregue não pode ser cancelado.");
+        await tx
+          .update(schema.requestItems)
+          .set({ status: "cancelled", updatedAt: new Date() })
+          .where(eq(schema.requestItems.id, id));
+      } else if (payload.status === "unavailable") {
+        // Item sem estoque físico: o separador avisa e o solicitante é notificado.
+        // O que já foi entregue permanece; só o restante fica indisponível.
+        if (cur.status === "cancelled") throw new ApiError(400, "Item cancelado.");
+        if (cur.status === "delivered") throw new ApiError(400, "Item já foi entregue por completo.");
+
+        const note = payload.statusNote?.trim() || null;
+        await tx
+          .update(schema.requestItems)
+          .set({ status: "unavailable", statusNote: note, updatedAt: new Date() })
+          .where(eq(schema.requestItems.id, id));
+
+        if (cur.status !== "unavailable") {
+          const [prod] = await tx
+            .select({ sku: schema.products.sku, name: schema.products.name })
+            .from(schema.products)
+            .where(eq(schema.products.id, cur.productId))
+            .limit(1);
+          await notify(tx, [
+            {
+              userId: currentReq.createdByUserId,
+              type: "item_unavailable",
+              requestId: cur.requestId,
+              requestItemId: id,
+              message:
+                `Requisição #${cur.requestId}: o item ${prod?.sku ?? cur.productId} — ${prod?.name ?? ""} ` +
+                `está sem estoque no almoxarifado.${note ? ` Obs.: ${note}` : ""}`,
+            },
+          ]);
+        }
+      } else if (payload.status === "pending") {
+        // desfazer "sem estoque" (o produto chegou)
+        if (cur.status !== "unavailable")
+          throw new ApiError(400, "Só é possível desfazer itens marcados como sem estoque.");
+        await tx
+          .update(schema.requestItems)
+          .set({
+            status: itemStatusFor(cur.deliveredQty, cur.requestedQty),
+            statusNote: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.requestItems.id, id));
+      } else {
+        const wanted = payload.deliveredQty ?? cur.deliveredQty;
+        ({ warnings } = await applyDeliveries(tx, {
+          requestId: cur.requestId,
+          targets: new Map([[id, wanted]]),
+          completeRest: false,
+          userId,
+          allowInsufficientStock: payload.confirmInsufficientStock,
+        }));
       }
-      // limita ao solicitado
-      if (deliveredQty > currentItem.requestedQty) deliveredQty = currentItem.requestedQty;
 
-      let newStatus: ItemStatus | undefined = payload.status as ItemStatus | undefined;
-      if (!newStatus) {
-        if (deliveredQty <= 0) newStatus = "pending";
-        else if (deliveredQty >= currentItem.requestedQty) newStatus = "delivered";
-        else newStatus = "partial";
-      }
-
-      // Atualiza item
-      await tx
-        .update(schema.requestItems)
-        .set({
-          deliveredQty,
-          status: newStatus,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.requestItems.id, id));
-
-      // Auditoria (item)
       await tx.insert(schema.auditLogs).values({
         tableName: "request_items",
         action: "UPDATE",
         recordId: String(id),
-        userId: Number.isFinite(userId) ? userId : null,
+        userId,
         payload: JSON.stringify({
-          requestId: currentItem.requestId,
-          before: {
-            deliveredQty: currentItem.deliveredQty,
-            status: currentItem.status,
-          },
-          after: {
-            deliveredQty,
-            status: newStatus,
-          },
+          requestId: cur.requestId,
+          before: { deliveredQty: cur.deliveredQty, status: cur.status },
+          request: payload.status
+            ? { status: payload.status, statusNote: payload.statusNote }
+            : { deliveredQty: payload.deliveredQty },
+          stockWarningsConfirmed: warnings.length ? warnings : undefined,
         }),
       });
 
-      // Recalcula status da requisição
-      const items = await tx
-        .select({ status: schema.requestItems.status })
-        .from(schema.requestItems)
-        .where(eq(schema.requestItems.requestId, currentItem.requestId));
-
-      const allCancelled = items.every((i) => i.status === "cancelled");
-      const allFinal = items.every((i) => i.status === "delivered" || i.status === "cancelled");
-
-      // computed com tipo explícito
-      const computed: RequestStatus = allCancelled
-        ? "cancelled"
-        : allFinal
-        ? "completed"
-        : "in_progress";
-
-      // narrow no status atual para o union correto
-      const curStatus = currentReq.status as RequestStatus;
-
-      if (curStatus !== computed && curStatus !== "cancelled") {
+      // recalcula o status da requisição a partir dos itens
+      const statuses = await itemStatuses(tx, cur.requestId);
+      const computed = requestStatusFromItems(statuses, currentReq.status as RequestStatus);
+      if (computed !== currentReq.status) {
         await tx
           .update(schema.requests)
-          .set({ status: computed, updatedAt: new Date() })
-          .where(eq(schema.requests.id, currentItem.requestId));
+          .set({
+            status: computed,
+            updatedAt: new Date(),
+            ...statusTimestamps(
+              { status: currentReq.status as RequestStatus, startedAt: currentReq.startedAt },
+              computed,
+            ),
+          })
+          .where(eq(schema.requests.id, cur.requestId));
 
         await tx.insert(schema.auditLogs).values({
           tableName: "requests",
           action: "STATUS_CHANGE",
-          recordId: String(currentItem.requestId),
-          userId: Number.isFinite(userId) ? userId : null,
-          payload: JSON.stringify({ from: curStatus, to: computed, reason: "item_update" }),
+          recordId: String(cur.requestId),
+          userId,
+          payload: JSON.stringify({ from: currentReq.status, to: computed, reason: "item_update" }),
         });
       }
 
-      // Retorna o item atualizado
       const [after] = await tx
         .select()
         .from(schema.requestItems)
         .where(eq(schema.requestItems.id, id))
         .limit(1);
 
-      return after;
+      return { after, warnings };
     });
+
+    return NextResponse.json({ data: result.after, warnings: result.warnings });
   } catch (e: any) {
-    // Se for um erro "nosso", responde com o status certo
     if (e instanceof ApiError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return NextResponse.json(
+        { error: e.message, code: e.code, ...(e.extra ?? {}) },
+        { status: e.status },
+      );
     }
-    // Loga outros erros e retorna 500 com JSON
     console.error("PATCH /api/requisicoes/itens error:", e);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-  }
-
-  return NextResponse.json({ data: updated });
-}
-
-// Utilitário de erro HTTP
-class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+    return NextResponse.json({ error: "Erro interno ao atualizar o item." }, { status: 500 });
   }
 }

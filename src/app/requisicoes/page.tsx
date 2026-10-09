@@ -14,6 +14,7 @@ type Req = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  unavailableCount?: number;
 };
 
 type ListResp = {
@@ -36,6 +37,18 @@ export default function RequisicoesPage() {
   const [createdBy, setCreatedBy] = useState<"all" | "me">("all");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
+
+  // atalhos da tela inicial: /requisicoes?status=in_progress&createdBy=me
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const s = sp.get("status");
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (s && ["pending", "in_progress", "completed", "cancelled"].includes(s)) {
+      setStatusFilter(s as "pending" | "in_progress" | "completed" | "cancelled");
+    }
+    if (sp.get("createdBy") === "me") setCreatedBy("me");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   // dados
   const [rows, setRows] = useState<Req[]>([]);
@@ -130,7 +143,7 @@ export default function RequisicoesPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Requisições</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Requisições</h1>
             <p className="text-sm text-gray-500">
               Fluxo: criar → atender → finalizar.{" "}
               <Link href="/produtos" className="underline">
@@ -142,7 +155,7 @@ export default function RequisicoesPage() {
           {canCreate && (
             <Link
               href="/requisicoes/nova"
-              className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+              className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
             >
               Nova Requisição
             </Link>
@@ -199,7 +212,7 @@ export default function RequisicoesPage() {
             <div>
               <button
                 onClick={resetAndReload}
-                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+                className="w-full rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
               >
                 Aplicar filtros
               </button>
@@ -267,6 +280,14 @@ export default function RequisicoesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <Badge status={r.status} />
+                        {r.unavailableCount ? (
+                          <div
+                            className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-800"
+                            title="Há item(ns) sem estoque no almoxarifado"
+                          >
+                            ⚠ {r.unavailableCount} sem estoque
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3">{r.note || "-"}</td>
                       <td className="px-4 py-3">{formatDate(r.createdAt)}</td>

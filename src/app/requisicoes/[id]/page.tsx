@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { patchWithStockConfirm } from "@/lib/patchWithStockConfirm";
 
 type ReqStatus = "pending" | "in_progress" | "completed" | "cancelled";
-type ItemStatus = "pending" | "partial" | "delivered" | "cancelled";
+type ItemStatus = "pending" | "partial" | "delivered" | "cancelled" | "unavailable";
 type Criticality = "cashier" | "service" | "restock";
 
 type Req = {
@@ -19,17 +20,21 @@ type Req = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
 };
 
 type ReqDetail = Req & {
   createdBy?: { id: number; name: string };
   assignedTo?: { id: number; name: string } | null;
+  cancelledBy?: { id: number; name: string } | null;
   items: Array<{
     id: number;
     productId: number;
     requestedQty: number;
     deliveredQty: number;
     status: ItemStatus;
+    statusNote?: string | null;
     productSku: string | null;
     productName: string | null;
     productUnit: string | null;
@@ -51,6 +56,7 @@ export default function ReqDetailPage() {
     | undefined;
 
   const canOperate = role === "admin" || role === "warehouse";
+  const myId = Number((session?.user as any)?.id);
 
   const [data, setData] = useState<ReqDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -98,12 +104,28 @@ export default function ReqDetailPage() {
     await load();
   }
 
-  async function conclude() {
-    if (!canOperate || !data) return;
+  // loja cancela só a própria requisição pendente; admin/almoxarifado também podem
+  // (a requisição continua no histórico como "cancelada")
+  async function cancelRequest() {
+    if (!data) return;
+    const reason = window.prompt(
+      "Cancelar esta requisição? Ela continuará no histórico como cancelada.\n\nMotivo (opcional):",
+      "",
+    );
+    if (reason === null) return; // desistiu
     const r = await fetch(`/api/requisicoes/${data.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "completed" }),
+      body: JSON.stringify({ status: "cancelled", cancelReason: reason.trim() || undefined }),
+    });
+    if (!r.ok) return alert((await safeJson(r))?.error || `Falha (HTTP ${r.status})`);
+    await load();
+  }
+
+  async function conclude() {
+    if (!canOperate || !data) return;
+    const r = await patchWithStockConfirm(`/api/requisicoes/${data.id}`, {
+      status: "completed",
     });
     if (!r.ok)
       return alert(
@@ -122,10 +144,8 @@ export default function ReqDetailPage() {
     }
     setSavingRow(itemId);
     try {
-      const r = await fetch(`/api/requisicoes/itens/${itemId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deliveredQty: qty }),
+      const r = await patchWithStockConfirm(`/api/requisicoes/itens/${itemId}`, {
+        deliveredQty: qty,
       });
       const j = await safeJson(r);
       if (!r.ok) {
@@ -168,7 +188,7 @@ export default function ReqDetailPage() {
           <>
             <header className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-semibold text-gray-900">
+                <h1 className="text-2xl font-semibold tracking-tight text-brand-950">
                   Requisição #{data.id}
                 </h1>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600">
@@ -190,8 +210,38 @@ export default function ReqDetailPage() {
                     Obs.: {data.note}
                   </p>
                 ) : null}
+                {data.status === "cancelled" ? (
+                  <p className="mt-1 text-sm text-red-700">
+                    Cancelada{data.cancelledBy?.name ? ` por ${data.cancelledBy.name}` : ""}
+                    {data.cancelledAt ? ` em ${new Date(data.cancelledAt + "Z").toLocaleString()}` : ""}
+                    {data.cancelReason ? ` — Motivo: ${data.cancelReason}` : ""}
+                  </p>
+                ) : null}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/requisicoes/${data.id}/imprimir?formato=a4`}
+                  target="_blank"
+                  className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                >
+                  Imprimir A4
+                </Link>
+                <Link
+                  href={`/requisicoes/${data.id}/imprimir?formato=termica`}
+                  target="_blank"
+                  className="rounded-lg border px-3 py-1.5 hover:bg-gray-50"
+                >
+                  Térmica
+                </Link>
+                {data.status === "pending" &&
+                  (canOperate || (role === "store" && data.createdByUserId === myId)) && (
+                    <button
+                      onClick={cancelRequest}
+                      className="rounded-lg border border-red-200 px-3 py-1.5 text-red-700 hover:bg-red-50"
+                    >
+                      Cancelar
+                    </button>
+                  )}
                 {canOperate && data.status === "pending" && (
                   <button
                     onClick={assume}
@@ -283,6 +333,11 @@ export default function ReqDetailPage() {
                             </td>
                             <td className="px-4 py-3">
                               <SmallBadge status={it.status} />
+                              {it.status === "unavailable" && it.statusNote ? (
+                                <div className="mt-1 max-w-[16rem] text-xs text-gray-600">
+                                  {it.statusNote}
+                                </div>
+                              ) : null}
                             </td>
                             <td className="px-4 py-3">
                               {editable ? (
@@ -374,6 +429,7 @@ function SmallBadge({ status }: { status: ItemStatus }) {
     partial: "bg-blue-100 text-blue-800",
     delivered: "bg-green-100 text-green-800",
     cancelled: "bg-red-100 text-red-800",
+    unavailable: "bg-orange-100 text-orange-800",
   };
   return (
     <span
@@ -385,6 +441,8 @@ function SmallBadge({ status }: { status: ItemStatus }) {
         ? "Parcial"
         : status === "delivered"
         ? "Entregue"
+        : status === "unavailable"
+        ? "Sem estoque"
         : "Cancelado"}
     </span>
   );

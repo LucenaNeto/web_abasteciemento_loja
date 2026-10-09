@@ -45,3 +45,5 @@ next-env.d.ts
 data/*.sqlite
 data/*.db
 data/*.sqlite3
+# exceção: modelo de variáveis (sem segredos)
+!.env.example

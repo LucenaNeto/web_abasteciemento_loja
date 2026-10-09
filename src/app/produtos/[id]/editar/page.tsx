@@ -48,6 +48,7 @@ export default function EditarProdutoPage() {
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("UN");
   const [stock, setStock] = useState<number>(0);
+  const [loadedStock, setLoadedStock] = useState<number | null>(null); // estoque ao abrir a tela
   const [isActive, setIsActive] = useState(true);
 
   function backHref() {
@@ -71,6 +72,7 @@ export default function EditarProdutoPage() {
       setName(p.name ?? "");
       setUnit((p.unit ?? "UN").toString());
       setStock(Number(p.stock ?? 0));
+      setLoadedStock(Number(p.stock ?? 0));
       setIsActive(p.isActive === true || p.isActive === 1);
     } catch (e: any) {
       setErr(String(e?.message ?? e));
@@ -94,6 +96,7 @@ export default function EditarProdutoPage() {
           name: name.trim(),
           unit: unit.trim() || "UN",
           stock: Number.isFinite(stock) ? stock : 0,
+          expectedStock: loadedStock,
           isActive,
         }),
       });
@@ -219,7 +222,7 @@ export default function EditarProdutoPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-50"
+                  className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-50"
                 >
                   {saving ? "Salvando..." : "Salvar"}
                 </button>

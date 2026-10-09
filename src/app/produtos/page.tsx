@@ -119,7 +119,7 @@ export default function ProdutosPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Produtos</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Produtos</h1>
             <p className="text-sm text-gray-500">
               Cadastre e pesquise SKUs.
               {isAdmin ? " Você tem permissão para criar/editar." : ""}
@@ -129,7 +129,7 @@ export default function ProdutosPage() {
           {isAdmin && (
             <Link
               href={`/produtos/novo${unitId ? `?unitId=${unitId}` : ""}`}
-              className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+              className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
             >
               Novo Produto
             </Link>
@@ -187,7 +187,7 @@ export default function ProdutosPage() {
             <div>
               <button
                 onClick={resetAndReload}
-                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+                className="w-full rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
               >
                 Aplicar filtros
               </button>

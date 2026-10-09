@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { patchWithStockConfirm } from "@/lib/patchWithStockConfirm";
 
 type Role = "admin" | "store" | "warehouse";
 
@@ -128,10 +129,8 @@ export default function AtenderRequisicaoPage() {
         deliveredQty: Number(qty) || 0,
       }));
 
-      const resp = await fetch(`/api/requisicoes/${requestId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items: payloadItems }),
+      const resp = await patchWithStockConfirm(`/api/requisicoes/${requestId}`, {
+        items: payloadItems,
       });
 
       if (!resp.ok) {
@@ -154,6 +153,40 @@ export default function AtenderRequisicaoPage() {
     }
   }
 
+  // marca (ou desfaz) "sem estoque" de um item; quem pediu recebe um aviso
+  async function setItemUnavailable(itemId: number, unavailable: boolean) {
+    let statusNote: string | undefined;
+    if (unavailable) {
+      const note = window.prompt(
+        "Item sem estoque no almoxarifado. Quem pediu será avisado.\n\nObservação (opcional, ex.: 'previsão de chegada sexta'):",
+        "",
+      );
+      if (note === null) return;
+      statusNote = note.trim() || undefined;
+    }
+    try {
+      setSaving(true);
+      setErrMsg(null);
+      const resp = await fetch(`/api/requisicoes/itens/${itemId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          unavailable ? { status: "unavailable", statusNote } : { status: "pending" },
+        ),
+      });
+      if (!resp.ok) {
+        const j = await safeJson(resp);
+        throw new Error(j?.error || `Falha (HTTP ${resp.status})`);
+      }
+      await load();
+    } catch (e: any) {
+      setErrMsg(String(e?.message ?? e));
+      alert(String(e?.message ?? e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function concluir() {
     if (!Number.isFinite(requestId)) return;
     if (
@@ -167,10 +200,8 @@ export default function AtenderRequisicaoPage() {
       setSaving(true);
       setErrMsg(null);
 
-      const resp = await fetch(`/api/requisicoes/${requestId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
+      const resp = await patchWithStockConfirm(`/api/requisicoes/${requestId}`, {
+        status: "completed",
       });
 
       if (!resp.ok) {
@@ -270,6 +301,7 @@ export default function AtenderRequisicaoPage() {
                   <th className="px-4 py-3 text-right">Solicitada</th>
                   <th className="px-4 py-3 text-right">Entregue</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Estoque</th>
                 </tr>
               </thead>
               <tbody>
@@ -277,7 +309,7 @@ export default function AtenderRequisicaoPage() {
                 {(!req.items || req.items.length === 0) ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-4 py-6 text-center text-gray-500"
                     >
                       Sem itens nesta requisição.
@@ -328,7 +360,9 @@ export default function AtenderRequisicaoPage() {
                                   ? "bg-blue-100 text-blue-800"
                                   : it.status === "cancelled"
                                     ? "bg-red-100 text-red-800"
-                                    : "bg-yellow-100 text-yellow-800")
+                                    : it.status === "unavailable"
+                                      ? "bg-orange-100 text-orange-800"
+                                      : "bg-yellow-100 text-yellow-800")
                             }
                           >
                             {it.status === "delivered"
@@ -337,8 +371,36 @@ export default function AtenderRequisicaoPage() {
                                 ? "Parcial"
                                 : it.status === "cancelled"
                                   ? "Cancelado"
-                                  : "Pendente"}
+                                  : it.status === "unavailable"
+                                    ? "Sem estoque"
+                                    : "Pendente"}
                           </span>
+                          {it.status === "unavailable" && it.statusNote ? (
+                            <div className="mt-1 max-w-[16rem] text-xs text-gray-600">
+                              {it.statusNote}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">
+                          {it.status === "unavailable" ? (
+                            <button
+                              onClick={() => setItemUnavailable(it.id, false)}
+                              disabled={saving || disabled}
+                              className="rounded-lg border px-2.5 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              title="O produto chegou: voltar o item ao normal"
+                            >
+                              Desfazer
+                            </button>
+                          ) : it.status !== "delivered" && it.status !== "cancelled" ? (
+                            <button
+                              onClick={() => setItemUnavailable(it.id, true)}
+                              disabled={saving || disabled}
+                              className="rounded-lg border border-orange-200 px-2.5 py-1 text-xs text-orange-800 hover:bg-orange-50 disabled:opacity-50"
+                              title="Não há este produto no almoxarifado: avisa quem pediu"
+                            >
+                              Sem estoque
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -375,7 +437,7 @@ export default function AtenderRequisicaoPage() {
             onClick={concluir}
             // CORRIGIDO: de 'items' para 'req.items'
             disabled={saving || !req.items || req.items.length === 0}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
             title="Concluir requisição (exige 100% entregue)"
           >
             {saving ? "Concluindo..." : "Concluir requisição"}

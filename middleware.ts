@@ -25,7 +25,8 @@ export async function middleware(req: NextRequest) {
 
   // Lê o token da sessão (requer NEXTAUTH_SECRET no .env)
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const isLogged = !!token;
+  // token.invalid: usuário desativado/removido (marcado em src/server/auth/session-check.ts)
+  const isLogged = !!token && !(token as { invalid?: boolean }).invalid;
 
   // Usuário já autenticado acessando /login => manda pra home
   if (pathname.startsWith("/login")) {
@@ -50,7 +51,7 @@ export async function middleware(req: NextRequest) {
   // ---------- Regras de acesso por rota ----------
 
   // Admin-only
-  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria"];
+  const adminOnly = ["/produtos/import", "/usuarios", "/auditoria", "/relatorios"];
   if (adminOnly.some((p) => pathname.startsWith(p))) {
     if (role !== "admin") return deny(req);
   }
