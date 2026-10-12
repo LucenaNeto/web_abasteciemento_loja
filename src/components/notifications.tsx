@@ -1,6 +1,6 @@
 // src/components/notifications.tsx
 // Sino de avisos + alerta sonoro. Atualiza por consulta periódica (a Vercel é serverless,
-// sem conexão aberta): a cada 15 s com a aba visível, e ao voltar para a aba.
+// sem conexão aberta): a cada 30 s com a aba visível (~60 s em segundo plano) e ao voltar para a aba.
 "use client";
 
 import Link from "next/link";
@@ -16,7 +16,9 @@ export type AppNotification = {
   readAt: string | null;
 };
 
-const POLL_MS = 15_000;
+// Consulta a cada 30 s com a aba visível e a cada ~60 s em segundo plano.
+// (Plano Hobby da Vercel: 1 milhão de chamadas/mês; menos consultas = folga no limite.)
+const POLL_MS = 30_000;
 const SOUND_KEY = "alertaSonoro";
 
 /* ---------- som (Web Audio: sem arquivos de áudio) ---------- */
@@ -160,7 +162,12 @@ export function useNotifications(enabled: boolean) {
     if (!enabled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    let tick = 0;
+    const timer = window.setInterval(() => {
+      tick++;
+      // em segundo plano, consulta a cada 2 ciclos (~60 s)
+      if (document.visibilityState === "visible" || tick % 2 === 0) void load();
+    }, POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
