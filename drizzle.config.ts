@@ -1,10 +1,15 @@
 // drizzle.config.ts
 import { defineConfig } from "drizzle-kit";
 import * as dotenv from "dotenv";
+import { assertSafeDb } from "./scripts/guard-db";
 
 // Carrega variáveis de ambiente (tanto .env.local quanto .env, se existirem)
 dotenv.config({ path: ".env.local" });
 dotenv.config();
+
+// generate/check só leem arquivos locais; o resto (migrate, studio, push) toca o banco
+const touchesDb = !process.argv.some((a) => a === "generate" || a === "check");
+if (touchesDb) assertSafeDb(`drizzle-kit ${process.argv.slice(2).join(" ")}`);
 
 if (!process.env.DATABASE_URL) {
   console.warn(

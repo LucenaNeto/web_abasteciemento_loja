@@ -1,7 +1,25 @@
 @import "tailwindcss";
 
+/* ===== Identidade visual: verde-oliva do logo do Grupo Ana Sobral (~#304018) ===== */
+@theme {
+  --color-brand-50: #f5f8ef;
+  --color-brand-100: #e8f0da;
+  --color-brand-200: #d1e1b7;
+  --color-brand-300: #b0cb87;
+  --color-brand-400: #8fb35e;
+  --color-brand-500: #6f963f;
+  --color-brand-600: #567a30;
+  --color-brand-700: #425e27;
+  --color-brand-800: #304018; /* cor principal (logo) */
+  --color-brand-900: #232f12;
+  --color-brand-950: #151c0a;
+
+  /* fundo geral levemente esverdeado/quente, combina com o verde da marca */
+  --color-surface: #f6f7f3;
+}
+
 :root {
-  --background: #ffffff;
+  --background: #f6f7f3;
   --foreground: #171717;
 }
 
@@ -12,15 +30,21 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* foco visível e consistente */
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+
+/* telas antigas usam <main min-h-screen bg-gray-50>: dentro do novo layout elas
+   herdam o fundo e a altura do shell (sem rolagem dupla) */
+.app-content > main {
+  min-height: 0 !important;
+  background: transparent !important;
 }

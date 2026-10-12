@@ -102,7 +102,7 @@ export default function AuditoriaPage() {
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl">
         <header>
-          <h1 className="text-2xl font-semibold text-gray-900">Auditoria</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Auditoria</h1>
           <p className="text-sm text-gray-500">Rastreabilidade de ações (CRUD, mudanças de status, etc.).</p>
         </header>
 
@@ -158,7 +158,7 @@ export default function AuditoriaPage() {
               />
             </div>
             <div className="sm:col-span-6">
-              <button onClick={resetAndReload} className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800">
+              <button onClick={resetAndReload} className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700">
                 Aplicar filtros
               </button>
             </div>

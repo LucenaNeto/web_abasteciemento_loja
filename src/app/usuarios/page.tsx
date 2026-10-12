@@ -358,7 +358,7 @@ export default function UsuariosPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Usuários</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">Usuários</h1>
             <p className="text-sm text-gray-500">Gerencie acesso: nome, papel, status, senha e unidades.</p>
           </div>
           <button
@@ -370,7 +370,7 @@ export default function UsuariosPage() {
               setNewPrimaryUnitId(null);
               if (units.length === 0) loadUnits();
             }}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
           >
             Novo Usuário
           </button>
@@ -429,7 +429,7 @@ export default function UsuariosPage() {
             <div>
               <button
                 onClick={resetAndReload}
-                className="w-full rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800"
+                className="w-full rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700"
               >
                 Aplicar filtros
               </button>
@@ -648,7 +648,7 @@ export default function UsuariosPage() {
               <button
                 onClick={createUser}
                 disabled={savingNew}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+                className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
               >
                 {savingNew ? "Salvando..." : "Salvar"}
               </button>
@@ -752,7 +752,7 @@ export default function UsuariosPage() {
               <button
                 onClick={saveEdit}
                 disabled={savingEdit}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:bg-gray-800 disabled:opacity-60"
+                className="rounded-xl bg-brand-800 px-4 py-2 text-white hover:bg-brand-700 disabled:opacity-60"
               >
                 {savingEdit ? "Salvando..." : "Salvar alterações"}
               </button>

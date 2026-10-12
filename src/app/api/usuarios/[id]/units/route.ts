@@ -139,7 +139,14 @@ async function saveUnits(
     }
   }
 
+  const adminId = Number((guard.session.user as any).id);
+
   await withTransaction(async (tx) => {
+    const before = await tx
+      .select({ unitId: schema.userUnits.unitId, isPrimary: schema.userUnits.isPrimary })
+      .from(schema.userUnits)
+      .where(eq(schema.userUnits.userId, userId));
+
     // apaga todas as relações atuais
     await tx.delete(schema.userUnits).where(eq(schema.userUnits.userId, userId));
 
@@ -153,6 +160,17 @@ async function saveUnits(
         })),
       );
     }
+
+    await tx.insert(schema.auditLogs).values({
+      tableName: "users",
+      action: "UNITS_UPDATE",
+      recordId: String(userId),
+      userId: Number.isFinite(adminId) ? adminId : null,
+      payload: JSON.stringify({
+        before: { unitIds: before.map((b) => b.unitId), primaryUnitId: before.find((b) => b.isPrimary)?.unitId ?? null },
+        after: { unitIds: unique, primaryUnitId },
+      }),
+    });
   });
 
   return NextResponse.json({

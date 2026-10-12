@@ -144,7 +144,7 @@ export default function RelatorioRequisicoesPage() {
 
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">
+            <h1 className="text-2xl font-semibold tracking-tight text-brand-950">
               Relatório — Requisições
             </h1>
             <p className="text-sm text-gray-600">
@@ -361,7 +361,7 @@ function CardStat({
   return (
     <div className={`rounded-2xl border bg-white p-4 ${className}`}>
       <div className="text-xs text-gray-500">{title}</div>
-      <div className="mt-1 text-2xl font-semibold text-gray-900">{value}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight text-brand-950">{value}</div>
     </div>
   );
 }

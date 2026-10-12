@@ -1,7 +1,7 @@
 // src/app/api/produtos/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { db, schema } from "@/server/db";
+import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 
@@ -219,17 +219,53 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "SKU já existe nesta unidade." }, { status: 409 });
   }
 
-  const [created] = await db
-    .insert(schema.products)
-    .values({
-      unitId: payload.unitId,
-      sku: payload.sku,
-      name: payload.name,
-      unit: payload.unit ?? "UN",
-      isActive: payload.isActive ?? true,
-      stock: payload.stock ?? 0,
-    })
-    .returning();
+  const adminId = Number((guard.session.user as any).id);
+  const userId = Number.isFinite(adminId) ? adminId : null;
 
-  return NextResponse.json({ data: created }, { status: 201 });
+  try {
+    const created = await withTransaction(async (tx) => {
+      const [row] = await tx
+        .insert(schema.products)
+        .values({
+          unitId: payload.unitId,
+          sku: payload.sku,
+          name: payload.name,
+          unit: payload.unit ?? "UN",
+          isActive: payload.isActive ?? true,
+          stock: payload.stock ?? 0,
+        })
+        .returning();
+
+      // estoque inicial também vira movimento (rastreável)
+      if (row.stock > 0) {
+        await tx.insert(schema.inventoryMovements).values({
+          productId: row.id,
+          qty: row.stock,
+          type: "adjust",
+          refType: "manual",
+          note: "Estoque inicial no cadastro do produto",
+          createdByUserId: userId,
+        });
+      }
+
+      await tx.insert(schema.auditLogs).values({
+        tableName: "products",
+        action: "CREATE",
+        recordId: String(row.id),
+        userId,
+        payload: JSON.stringify({ after: row }),
+      });
+
+      return row;
+    });
+
+    return NextResponse.json({ data: created }, { status: 201 });
+  } catch (e) {
+    const err = e as { code?: string; cause?: { code?: string } };
+    if (err?.code === "23505" || err?.cause?.code === "23505") {
+      return NextResponse.json({ error: "SKU já existe nesta unidade." }, { status: 409 });
+    }
+    console.error("POST /api/produtos error:", e);
+    return NextResponse.json({ error: "Falha ao criar produto." }, { status: 500 });
+  }
 }

@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, like, sql } from "drizzle-orm";
+import { notify, warehouseUserIdsOfUnit } from "@/server/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,7 +133,11 @@ export async function GET(req: Request) {
     .where(whereClause as any);
 
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(schema.requests),
+      // itens "sem estoque" (a loja vê o alerta já na lista)
+      unavailableCount: sql<number>`(select count(*)::int from request_items ri where ri.request_id = requests.id and ri.status = 'unavailable')`,
+    })
     .from(schema.requests)
     .where(whereClause as any)
     .orderBy(desc(schema.requests.id))
@@ -310,6 +315,25 @@ export async function POST(req: Request) {
         },
       }),
     });
+
+    // Avisa os almoxarifes da unidade (sino + alerta sonoro). Na mesma transação:
+    // se a requisição não for criada, nenhum aviso é enviado.
+    const [unitRow] = await tx
+      .select({ name: schema.units.name })
+      .from(schema.units)
+      .where(eq(schema.units.id, unitId))
+      .limit(1);
+    const warehouseIds = await warehouseUserIdsOfUnit(tx, unitId);
+    const urgent = payload.criticality === "cashier" ? " (URGENTE — caixa)" : "";
+    await notify(
+      tx,
+      warehouseIds.map((wid) => ({
+        userId: wid,
+        type: "request_created" as const,
+        requestId,
+        message: `Nova requisição #${requestId}${urgent} — ${unitRow?.name ?? "unidade"} (${payload.items.length} ${payload.items.length === 1 ? "item" : "itens"})`,
+      })),
+    );
 
     const [reqRow] = await tx
       .select()

@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, homolog]
+  push:
+    branches: [homolog]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Valores falsos: o build não conecta no banco, só precisa das variáveis definidas.
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          NEXTAUTH_SECRET: ci-secret
+          NEXTAUTH_URL: http://localhost:3000

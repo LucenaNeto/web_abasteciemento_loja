@@ -5,7 +5,8 @@ import { z } from "zod";
 import * as XLSX from "xlsx";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { findExistingSkus, MAX_IMPORT_BYTES } from "@/server/import/existing-skus";
+import { eq, sql } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,13 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: `Nenhum arquivo encontrado no multipart. Chaves recebidas: ${keys.join(", ")}` },
       { status: 400 },
+    );
+  }
+
+  if (typeof (filePart as any).size === "number" && (filePart as any).size > MAX_IMPORT_BYTES) {
+    return NextResponse.json(
+      { error: `Arquivo muito grande (máx. ${MAX_IMPORT_BYTES / 1024 / 1024} MB).` },
+      { status: 413 },
     );
   }
 
@@ -129,18 +137,8 @@ export async function POST(req: Request) {
   }
 
   // --- EXISTENTES por (unitId + sku) ---
-  const skuList = cleaned.map((c) => c.row.sku);
-  const existingSkusUpper = new Set<string>();
-
-  // chunk para evitar query gigante
-  for (const chunk of chunkArray(skuList, 1000)) {
-    const rows = await db
-      .select({ sku: schema.products.sku })
-      .from(schema.products)
-      .where(and(eq(schema.products.unitId, unitId), inArray(schema.products.sku, chunk)));
-
-    for (const r of rows) existingSkusUpper.add(String(r.sku).toUpperCase());
-  }
+  const existingBySku = await findExistingSkus(unitId, cleaned.map((c) => c.row.sku));
+  const existingSkusUpper = new Set(Array.from(existingBySku.keys()).map((k) => k.toUpperCase()));
 
   const insertedPlanned =
     mode === "insert"
@@ -169,7 +167,7 @@ export async function POST(req: Request) {
     await withTransaction(async (tx) => {
       const values = cleaned.map(({ row }) => ({
         unitId,
-        sku: row.sku,
+        sku: existingBySku.get(row.sku.toLowerCase()) ?? row.sku,
         name: row.name,
         unit: row.unit ?? "UN",
         isActive: row.isActive ?? true,

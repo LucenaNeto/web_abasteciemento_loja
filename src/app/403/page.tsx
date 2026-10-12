@@ -1,4 +1,6 @@
 // src/app/403/page.tsx
+import Link from "next/link";
+
 export const metadata = { title: "Acesso negado • 403" };
 
 export default function ForbiddenPage() {
@@ -9,22 +11,22 @@ export default function ForbiddenPage() {
           ⛔
         </div>
 
-        <h1 className="mt-4 text-2xl font-semibold text-gray-900">Acesso negado</h1>
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-brand-950">Acesso negado</h1>
         <p className="mt-2 text-sm text-gray-600">
           Você não tem permissão para acessar esta página. Verifique seu perfil de acesso
           (Admin, Loja ou Almoxarifado).
         </p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <a
+          <Link
             href="/"
             className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50"
           >
             ← Voltar ao início
-          </a>
+          </Link>
           <a
             href="/login"
-            className="rounded-xl bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800"
+            className="rounded-xl bg-brand-800 px-4 py-2 text-sm text-white hover:bg-brand-700"
           >
             Entrar com outra conta
           </a>
