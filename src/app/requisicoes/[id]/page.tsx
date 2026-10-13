@@ -22,12 +22,15 @@ type Req = {
   updatedAt: string;
   cancelledAt?: string | null;
   cancelReason?: string | null;
+  completedAt?: string | null;
 };
 
 type ReqDetail = Req & {
   createdBy?: { id: number; name: string };
   assignedTo?: { id: number; name: string } | null;
   cancelledBy?: { id: number; name: string } | null;
+  completedBy?: { id: number; name: string } | null;
+  unit?: { id: number; code: string; name: string } | null;
   items: Array<{
     id: number;
     productId: number;
@@ -134,6 +137,36 @@ export default function ReqDetailPage() {
     await load();
   }
 
+  // marca (ou desfaz) "sem estoque" de um item; quem pediu recebe um aviso no sino.
+  // O que já foi entregue permanece; só o restante fica sem estoque.
+  async function setItemUnavailable(itemId: number, unavailable: boolean) {
+    if (!canOperate) return;
+    let statusNote: string | undefined;
+    if (unavailable) {
+      const note = window.prompt(
+        "Item sem estoque no almoxarifado. Quem pediu será avisado.\n\nObservação (opcional, ex.: 'previsão de chegada sexta'):",
+        "",
+      );
+      if (note === null) return;
+      statusNote = note.trim() || undefined;
+    }
+    setSavingRow(itemId);
+    try {
+      const r = await fetch(`/api/requisicoes/itens/${itemId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(unavailable ? { status: "unavailable", statusNote } : { status: "pending" }),
+      });
+      const j = await safeJson(r);
+      if (!r.ok) throw new Error(j?.error || `Falha (HTTP ${r.status})`);
+      await load();
+    } catch (e: any) {
+      alert(String(e?.message ?? e));
+    } finally {
+      setSavingRow(null);
+    }
+  }
+
   async function saveItem(itemId: number) {
     if (!canOperate) return;
     const val = editQty[itemId];
@@ -201,10 +234,27 @@ export default function ReqDetailPage() {
                       criticality={data.criticality}
                     />
                   </span>
-                  {data.assignedTo?.name ? (
-                    <span>• Responsável: {data.assignedTo.name}</span>
-                  ) : null}
                 </p>
+                {/* quem pediu, quem atendeu, onde e quando — visível para todos os perfis */}
+                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+                  <dt className="text-gray-500">Solicitante</dt>
+                  <dd className="font-medium text-gray-900">{data.createdBy?.name ?? "—"}</dd>
+                  <dt className="text-gray-500">Repositor</dt>
+                  <dd className="font-medium text-gray-900">
+                    {data.assignedTo?.name ?? data.completedBy?.name ?? "—"}
+                    {!data.assignedTo?.name && data.completedBy?.name ? (
+                      <span className="ml-1 text-xs font-normal text-gray-500">(concluiu)</span>
+                    ) : null}
+                  </dd>
+                  {data.unit ? (
+                    <>
+                      <dt className="text-gray-500">Unidade</dt>
+                      <dd className="text-gray-900">
+                        {data.unit.code} — {data.unit.name}
+                      </dd>
+                    </>
+                  ) : null}
+                </dl>
                 {data.note ? (
                   <p className="mt-1 text-sm text-gray-500">
                     Obs.: {data.note}
@@ -260,6 +310,29 @@ export default function ReqDetailPage() {
                 )}
               </div>
             </header>
+
+            {/* alerta para quem pediu (e para quem atende): há item(ns) sem estoque */}
+            {data.items.some((i) => i.status === "unavailable") ? (
+              <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
+                <div className="font-semibold">
+                  ⚠ {data.items.filter((i) => i.status === "unavailable").length === 1
+                    ? "1 item sem estoque no almoxarifado"
+                    : `${data.items.filter((i) => i.status === "unavailable").length} itens sem estoque no almoxarifado`}
+                </div>
+                <ul className="mt-1 list-disc pl-5">
+                  {data.items
+                    .filter((i) => i.status === "unavailable")
+                    .map((i) => (
+                      <li key={i.id}>
+                        {i.productName ?? "-"}
+                        {i.productSku ? ` (${i.productSku})` : ""}
+                        {i.deliveredQty > 0 ? ` — entregue ${i.deliveredQty} de ${i.requestedQty}` : ""}
+                        {i.statusNote ? ` — ${i.statusNote}` : ""}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
 
             {/* Itens */}
             <section className="mt-6 rounded-2xl border border-gray-200 bg-white">
@@ -341,15 +414,36 @@ export default function ReqDetailPage() {
                             </td>
                             <td className="px-4 py-3">
                               {editable ? (
-                                <button
-                                  onClick={() => saveItem(it.id)}
-                                  disabled={savingRow === it.id}
-                                  className="rounded-lg border px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
-                                >
-                                  {savingRow === it.id
-                                    ? "Salvando..."
-                                    : "Salvar"}
-                                </button>
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() => saveItem(it.id)}
+                                    disabled={savingRow === it.id}
+                                    className="rounded-lg border px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                                  >
+                                    {savingRow === it.id
+                                      ? "Salvando..."
+                                      : "Salvar"}
+                                  </button>
+                                  {it.status === "unavailable" ? (
+                                    <button
+                                      onClick={() => setItemUnavailable(it.id, false)}
+                                      disabled={savingRow === it.id}
+                                      className="rounded-lg border px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                                      title="O produto chegou: voltar o item ao normal"
+                                    >
+                                      Desfazer
+                                    </button>
+                                  ) : it.status !== "delivered" && it.status !== "cancelled" ? (
+                                    <button
+                                      onClick={() => setItemUnavailable(it.id, true)}
+                                      disabled={savingRow === it.id}
+                                      className="rounded-lg border border-orange-200 px-3 py-1.5 text-orange-800 hover:bg-orange-50 disabled:opacity-50"
+                                      title="Não há este produto no estoque físico: avisa quem pediu"
+                                    >
+                                      Sem estoque
+                                    </button>
+                                  ) : null}
+                                </div>
                               ) : (
                                 <span className="text-xs text-gray-400">
                                   —
@@ -367,6 +461,7 @@ export default function ReqDetailPage() {
 
             <p className="mt-6 text-xs text-gray-500">
               Criada em {formatDateTimePt(data.createdAt)}
+              {data.completedAt ? ` • Concluída em ${formatDateTimePt(data.completedAt)}` : ""}
               {" • "}
               Atualizada em {formatDateTimePt(data.updatedAt)}
             </p>
