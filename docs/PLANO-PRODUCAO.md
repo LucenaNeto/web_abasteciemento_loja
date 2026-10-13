@@ -110,6 +110,9 @@ Usar só unidades de teste, para não criar lixo nos dados reais; cancelar as re
 
 ## 8. Etapa B — Mudança para o banco novo (conta nova)
 
+> **Plano detalhado e atualizado em [PLANO-ETAPA-B.md](PLANO-ETAPA-B.md)** (cópia por `pg_dump`/`pg_restore` pelo Docker,
+> congelamento do banco antigo, ensaio e correção de segurança do Supabase). O texto abaixo é o rascunho original.
+
 **Pré-requisitos**
 - Projeto de **produção** criado na conta nova: PostgreSQL **17**, mesma região (`sa-east-1`), URL do **pooler** (porta 6543) com IPv4.
 - A Etapa A estável por pelo menos alguns dias.
