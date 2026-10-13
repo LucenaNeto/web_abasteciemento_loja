@@ -136,6 +136,17 @@ export async function GET(req: Request) {
     .select({
       ...getTableColumns(schema.requests),
       // itens "sem estoque" (a loja vê o alerta já na lista)
+      // nomes para a lista: quem pediu e quem atendeu (responsável; se ninguém assumiu, quem concluiu)
+      createdByName: sql<string | null>`(select u.name from users u where u.id = requests.created_by_user_id)`,
+      responsibleName: sql<string | null>`coalesce(
+        (select u.name from users u where u.id = requests.assigned_to_user_id),
+        (select u.name from audit_logs a join users u on u.id = a.user_id
+          where a.table_name = 'requests' and a.action = 'STATUS_CHANGE'
+            and a.record_id = requests.id::text
+            and (case when a.payload ~ '^\s*\{' then a.payload::jsonb ->> 'to' end) = 'completed'
+          order by a.id desc limit 1)
+      )`,
+      itemsCount: sql<number>`(select count(*)::int from request_items rc where rc.request_id = requests.id)`,
       unavailableCount: sql<number>`(select count(*)::int from request_items ri where ri.request_id = requests.id and ri.status = 'unavailable')`,
     })
     .from(schema.requests)
