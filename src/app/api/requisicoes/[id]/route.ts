@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, schema, withTransaction } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { RequestStatus } from "@/server/db/schema";
 import {
   ApiError,
@@ -91,6 +91,21 @@ export async function GET(
     assignedTo = ass ?? null;
   }
 
+  // Quem concluiu (vem da auditoria, então também vale para as requisições antigas):
+  // aparece como "Atendido por" quando ninguém clicou em "Assumir".
+  let completedBy: { id: number; name: string } | null = null;
+  if (reqRow.status === "completed") {
+    const res = await db.execute(sql`
+      SELECT u.id, u.name
+        FROM audit_logs a JOIN users u ON u.id = a.user_id
+       WHERE a.table_name = 'requests' AND a.action = 'STATUS_CHANGE'
+         AND a.record_id = ${String(id)}
+         AND (CASE WHEN a.payload ~ '^\s*\{' THEN a.payload::jsonb ->> 'to' END) = 'completed'
+       ORDER BY a.id DESC LIMIT 1`);
+    const row = res.rows[0] as { id: number; name: string } | undefined;
+    completedBy = row ? { id: Number(row.id), name: String(row.name) } : null;
+  }
+
   let cancelledBy: { id: number; name: string } | null = null;
   if (reqRow.cancelledByUserId) {
     const [c] = await db
@@ -113,6 +128,7 @@ export async function GET(
       unit: unit ?? null,
       createdBy,
       assignedTo,
+      completedBy,
       cancelledBy,
       items,
     },

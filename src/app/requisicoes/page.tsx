@@ -15,6 +15,8 @@ type Req = {
   createdAt: string;
   updatedAt: string;
   unavailableCount?: number;
+  createdByName?: string | null;
+  responsibleName?: string | null;
 };
 
 type ListResp = {
@@ -246,6 +248,8 @@ export default function RequisicoesPage() {
                 <tr>
                   <th className="px-4 py-3">ID</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Solicitante</th>
+                  <th className="px-4 py-3">Repositor</th>
                   <th className="px-4 py-3">Observação</th>
                   <th className="px-4 py-3">Criada em</th>
                   <th className="px-4 py-3">Ações</th>
@@ -254,19 +258,19 @@ export default function RequisicoesPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td className="px-4 py-6 text-center" colSpan={5}>
+                    <td className="px-4 py-6 text-center" colSpan={7}>
                       Carregando...
                     </td>
                   </tr>
                 ) : err ? (
                   <tr>
-                    <td className="px-4 py-6 text-center text-red-600" colSpan={5}>
+                    <td className="px-4 py-6 text-center text-red-600" colSpan={7}>
                       {err}
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-center text-gray-500" colSpan={5}>
+                    <td className="px-4 py-6 text-center text-gray-500" colSpan={7}>
                       Nenhuma requisição encontrada.
                     </td>
                   </tr>
@@ -289,6 +293,8 @@ export default function RequisicoesPage() {
                           </div>
                         ) : null}
                       </td>
+                      <td className="px-4 py-3">{r.createdByName || "-"}</td>
+                      <td className="px-4 py-3">{r.responsibleName || "-"}</td>
                       <td className="px-4 py-3">{r.note || "-"}</td>
                       <td className="px-4 py-3">{formatDate(r.createdAt)}</td>
                       <td className="px-4 py-3">
