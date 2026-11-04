@@ -40,7 +40,7 @@ const bodySchema = z.object({
 const rowSchema = z.object({
   sku: z.string().trim().min(1, "SKU vazio.").max(64, "SKU muito longo (máx. 64)."),
   name: z.string().trim().min(1, "Nome vazio.").max(255, "Nome muito longo (máx. 255)."),
-  unit: z.string().trim().min(1).max(10, "Unidade muito longa (máx. 10)."),
+  unit: z.string().trim().min(1).max(10, "Quantidade/unidade muito longa (máx. 10)."),
 });
 
 export async function POST(req: Request) {
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
   const errors: { line: number; error: string }[] = [];
   const seen = new Set<string>();
   for (const r of body.rows) {
-    const parsed = rowSchema.safeParse({ sku: r.sku, name: r.name, unit: (r.unit ?? "").trim() || "UN" });
+    const parsed = rowSchema.safeParse({ sku: r.sku, name: r.name, unit: (r.unit ?? "").trim() || "0" });
     if (!parsed.success) {
       errors.push({ line: r.line, error: parsed.error.issues.map((i) => i.message).join(" ") });
       continue;

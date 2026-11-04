@@ -45,39 +45,39 @@ describe("letras de coluna", () => {
 describe("mapGrid: pega só A, B e H da planilha inteira", () => {
   const grid: Grid = [
     HEADER,
-    erpRow("84859", "EUD MAKE BAT HID K/M AVELA V5 3,7g", "un"),
-    erpRow("00123", "Shampoo Siàge 250ml", "CX"),
+    erpRow("84859", "EUD MAKE BAT HID K/M AVELA V5 3,7g", "13"),
+    erpRow("00123", "Shampoo Siàge 250ml", "7"),
     [], // linha vazia
     ["", "", "", "", "", "", "", "", "", ""], // linha em branco
     erpRow("", "", ""), // sem SKU e sem nome: ignorada em silêncio
     erpRow("84859", "Duplicado", "UN"), // SKU repetido
     erpRow("55555", "", "UN"), // nome vazio
-    erpRow("66666", "Sem unidade", ""), // unidade vazia -> UN
-    erpRow("77777", "Unidade enorme", "UNIDADE-DE-MEDIDA"), // > 10
-    erpRow("84860.0", "SKU lido como número", "PC"),
+    erpRow("66666", "Sem quantidade", ""), // célula vazia -> quantidade 0
+    erpRow("77777", "Valor enorme", "VALOR-MUITO-GRANDE"), // > 10 caracteres
+    erpRow("84860.0", "SKU lido como número", "5"),
   ];
 
-  it("usa A, B e H, descarta o cabeçalho e normaliza", () => {
+  it("usa A, B e H (quantidade), descarta o cabeçalho e normaliza", () => {
     const r = mapGrid(grid, DEFAULT_MAPPING, true);
     expect(r.rows.map((x) => [x.line, x.sku, x.name, x.unit])).toEqual([
-      [2, "84859", "EUD MAKE BAT HID K/M AVELA V5 3,7g", "UN"], // unidade em maiúsculas
-      [3, "00123", "Shampoo Siàge 250ml", "CX"], // zeros à esquerda preservados
-      [9, "66666", "Sem unidade", "UN"],
-      [11, "84860", "SKU lido como número", "PC"], // "84860.0" -> "84860"
+      [2, "84859", "EUD MAKE BAT HID K/M AVELA V5 3,7g", "13"], // quantidade guardada como veio
+      [3, "00123", "Shampoo Siàge 250ml", "7"], // zeros à esquerda do SKU preservados
+      [9, "66666", "Sem quantidade", "0"], // vazio vira 0
+      [11, "84860", "SKU lido como número", "5"], // "84860.0" -> "84860"
     ]);
     expect(r.errors.map((e) => e.line)).toEqual([7, 8, 10]);
     expect(r.errors[0].error).toContain("repetido");
     expect(r.errors[1].error).toContain("Nome vazio");
-    expect(r.errors[2].error).toContain("muito longa");
+    expect(r.errors[2].error).toContain("muito longo");
     expect(r.ignored).toBe(3); // 2 linhas vazias + 1 sem SKU/nome
   });
 
-  it("sem cabeçalho a 1ª linha também entra; unidade 'não usar' deixa tudo UN", () => {
-    const g: Grid = [erpRow("A1", "Primeiro", "CX"), erpRow("A2", "Segundo", "KG")];
+  it("sem cabeçalho a 1ª linha também entra; quantidade 'não usar' grava 0", () => {
+    const g: Grid = [erpRow("A1", "Primeiro", "9"), erpRow("A2", "Segundo", "4")];
     const r = mapGrid(g, { sku: "A", name: "B", unit: "" }, false);
     expect(r.rows.map((x) => [x.line, x.sku, x.unit])).toEqual([
-      [1, "A1", "UN"],
-      [2, "A2", "UN"],
+      [1, "A1", "0"],
+      [2, "A2", "0"],
     ]);
   });
 
@@ -99,7 +99,7 @@ describe("loadSpreadsheet: lê arquivos de verdade", () => {
   it("xlsx com várias abas e 10 colunas", async () => {
     const XLSX = await import("xlsx");
     const wb = XLSX.utils.book_new();
-    const aoa = [HEADER, erpRow("84859", "Produto A", "UN"), ["00123", "Produto B", "x", "x", "x", "x", "x", "CX"]];
+    const aoa = [HEADER, erpRow("84859", "Produto A", "12"), ["00123", "Produto B", "x", "x", "x", "x", "x", "3"]];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["resumo"]]), "Resumo");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Produtos");
     const u8 = new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" }));
@@ -110,13 +110,13 @@ describe("loadSpreadsheet: lê arquivos de verdade", () => {
 
     const r = mapGrid(ss.grid("Produtos"), DEFAULT_MAPPING, true);
     expect(r.rows.map((x) => [x.sku, x.name, x.unit])).toEqual([
-      ["84859", "Produto A", "UN"],
-      ["00123", "Produto B", "CX"],
+      ["84859", "Produto A", "12"],
+      ["00123", "Produto B", "3"],
     ]);
   });
 
   it("csv com ponto e vírgula e acentos em Windows-1252", async () => {
-    const text = ["Código;Descrição;a;b;c;d;e;Unid", "100;Condicionador Hidratação;1;2;3;4;5;un", "200;Máscara Capilar;1;2;3;4;5;CX"].join("\r\n");
+    const text = ["Código;Descrição;a;b;c;d;e;Unid", "100;Condicionador Hidratação;1;2;3;4;5;8", "200;Máscara Capilar;1;2;3;4;5;0"].join("\r\n");
     const buf = Buffer.from(text, "latin1"); // acentos em 1 byte, como o Excel salva em português
     const ss = await loadSpreadsheet({
       name: "produtos.csv",
@@ -126,8 +126,8 @@ describe("loadSpreadsheet: lê arquivos de verdade", () => {
     expect(ss.delimiter).toBe(";");
     const r = mapGrid(ss.grid(ss.sheets[0]), DEFAULT_MAPPING, true);
     expect(r.rows.map((x) => [x.sku, x.name, x.unit])).toEqual([
-      ["100", "Condicionador Hidratação", "UN"],
-      ["200", "Máscara Capilar", "CX"],
+      ["100", "Condicionador Hidratação", "8"],
+      ["200", "Máscara Capilar", "0"],
     ]);
   });
 
@@ -227,7 +227,7 @@ describe("POST /api/produtos/import/rows (integração, HOMOLOGAÇÃO)", () => {
       unitId: w.unit.id,
       mode: "upsert",
       rows: [
-        { line: 5, sku: ok, name: "Boa", unit: "" }, // unidade vazia -> UN
+        { line: 5, sku: ok, name: "Boa", unit: "" }, // quantidade vazia -> 0
         { line: 6, sku: "", name: "Sem SKU", unit: "UN" },
         { line: 7, sku: "X".repeat(65), name: "SKU longo", unit: "UN" },
         { line: 8, sku: `${ok}-U`, name: "Unidade longa", unit: "UNIDADE-LONGA" },
@@ -239,7 +239,7 @@ describe("POST /api/produtos/import/rows (integração, HOMOLOGAÇÃO)", () => {
     expect(body.valid).toBe(1);
     expect(body.errors.map((e: { line: number }) => e.line)).toEqual([6, 7, 8, 9]);
     const [p] = await db.select().from(schema.products).where(and(eq(schema.products.unitId, w.unit.id), eq(schema.products.sku, ok)));
-    expect(p.unit).toBe("UN");
+    expect(p.unit).toBe("0");
   });
 
   it("recusa unidade inexistente, corpo inválido e lote grande demais", async () => {

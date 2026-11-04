@@ -12,7 +12,7 @@ export type Mapping = {
   /** letras das colunas, ex.: "A" */
   sku: string;
   name: string;
-  /** "" = não usar (todas ficam com "UN") */
+  /** coluna da QUANTIDADE (gravada no campo `unit` do produto). "" = não usar (grava "0") */
   unit: string;
 };
 
@@ -188,9 +188,9 @@ export function mapGrid(grid: Grid, mapping: Mapping, hasHeader: boolean): MapRe
     }
 
     const unitRaw = iUnit >= 0 ? cell(r, iUnit) : "";
-    const unit = (unitRaw || "UN").toUpperCase();
+    const unit = (unitRaw || "0").toUpperCase(); // célula vazia = quantidade 0
     if (unit.length > 10) {
-      errors.push({ line, error: `Unidade "${unitRaw}" muito longa (máx. 10 caracteres), SKU ${sku}. Confira se a coluna da unidade está certa.` });
+      errors.push({ line, error: `Valor "${unitRaw}" muito longo na coluna da quantidade (máx. 10 caracteres), SKU ${sku}. Confira se a coluna está certa.` });
       continue;
     }
 

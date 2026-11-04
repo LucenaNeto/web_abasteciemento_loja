@@ -1,5 +1,5 @@
 // src/app/produtos/import/page.tsx
-// Importação por COLUNAS: envie a planilha inteira, escolha as colunas (padrão: A = SKU, B = nome, H = unidade).
+// Importação por COLUNAS: envie a planilha inteira, escolha as colunas (padrão: A = SKU, B = nome, H = quantidade).
 // A planilha é lida no próprio navegador; só os 3 campos escolhidos vão para o servidor, em lotes.
 "use client";
 
@@ -224,7 +224,7 @@ export default function ImportProdutosPage() {
         subtitle={
           <>
             Envie a planilha <strong>inteira</strong> (.xlsx, .xls ou .csv) e escolha só as colunas que importam. Padrão:{" "}
-            <strong>A</strong> = SKU, <strong>B</strong> = nome, <strong>H</strong> = unidade.
+            <strong>A</strong> = SKU, <strong>B</strong> = nome, <strong>H</strong> = quantidade.
           </>
         }
       />
@@ -308,9 +308,9 @@ export default function ImportProdutosPage() {
                   </select>
                 </label>
                 <label className="text-xs text-gray-600">
-                  Unidade (UN, CX…)
+                  Quantidade (coluna H)
                   <select className={sel} value={mapping.unit} onChange={(e) => (setMapping((m) => ({ ...m, unit: e.target.value })), resetRun())}>
-                    <option value="">(não usar — todas “UN”)</option>
+                    <option value="">(não usar — grava 0)</option>
                     {letters.map((l, i) => (
                       <option key={l} value={l}>
                         {optLabel(i)}
@@ -381,7 +381,7 @@ export default function ImportProdutosPage() {
                           }`}
                         >
                           {l}
-                          {l === mapping.sku ? " · SKU" : l === mapping.name ? " · Nome" : l === mapping.unit ? " · Unid." : ""}
+                          {l === mapping.sku ? " · SKU" : l === mapping.name ? " · Nome" : l === mapping.unit ? " · Qtd." : ""}
                         </th>
                       ))}
                     </tr>
@@ -425,7 +425,7 @@ export default function ImportProdutosPage() {
                         <th className="px-3 py-2">Linha</th>
                         <th className="px-3 py-2">SKU</th>
                         <th className="px-3 py-2">Nome</th>
-                        <th className="px-3 py-2">Unidade</th>
+                        <th className="px-3 py-2">Quantidade</th>
                       </tr>
                     </thead>
                     <tbody>
