@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 import { parse } from "csv-parse/sync";
 import { z } from "zod";
 import * as XLSX from "xlsx";
-import { db, schema, withTransaction } from "@/server/db";
+import { db, schema } from "@/server/db";
 import { ensureRoleApi } from "@/server/auth/rbac";
-import { findExistingSkus, MAX_IMPORT_BYTES } from "@/server/import/existing-skus";
-import { eq, sql } from "drizzle-orm";
+import { MAX_IMPORT_BYTES } from "@/server/import/existing-skus";
+import { applyProducts } from "@/server/import/write-products";
+import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,97 +137,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Nenhuma linha válida.", details: errors }, { status: 400 });
   }
 
-  // --- EXISTENTES por (unitId + sku) ---
-  const existingBySku = await findExistingSkus(unitId, cleaned.map((c) => c.row.sku));
-  const existingSkusUpper = new Set(Array.from(existingBySku.keys()).map((k) => k.toUpperCase()));
-
-  const insertedPlanned =
-    mode === "insert"
-      ? cleaned.filter((c) => !existingSkusUpper.has(c.row.sku.toUpperCase())).length
-      : cleaned.filter((c) => !existingSkusUpper.has(c.row.sku.toUpperCase())).length;
-
-  const updatedPlanned =
-    mode === "upsert"
-      ? cleaned.filter((c) => existingSkusUpper.has(c.row.sku.toUpperCase())).length
-      : 0;
-
-  const skippedPlanned = mode === "insert" ? cleaned.length - insertedPlanned : 0;
-
   const adminId = Number((guard.session.user as any).id);
-  const summary = {
-    unitId,
-    mode,
-    inserted: 0,
-    updated: 0,
-    skipped: 0,
-    errors,
-  };
 
-  // --- escreve no banco ---
+  // --- grava (ou calcula) com o gravador compartilhado ---
+  let result;
   try {
-    await withTransaction(async (tx) => {
-      const values = cleaned.map(({ row }) => ({
-        unitId,
-        sku: existingBySku.get(row.sku.toLowerCase()) ?? row.sku,
-        name: row.name,
-        unit: row.unit ?? "UN",
-        isActive: row.isActive ?? true,
-        stock: 0,
-      }));
-
-      if (mode === "insert") {
-        // insere só os que não existem
-        const toInsert = values.filter((v) => !existingSkusUpper.has(v.sku.toUpperCase()));
-
-        for (const batch of chunkArray(toInsert, 500)) {
-          if (batch.length === 0) continue;
-          await tx.insert(schema.products).values(batch);
-        }
-
-        summary.inserted = insertedPlanned;
-        summary.skipped = skippedPlanned;
-      } else {
-        // upsert em lote (unitId + sku)
-        for (const batch of chunkArray(values, 500)) {
-          if (batch.length === 0) continue;
-
-          await tx
-            .insert(schema.products)
-            .values(batch)
-            .onConflictDoUpdate({
-              target: [schema.products.unitId, schema.products.sku],
-              set: {
-                name: sql`excluded.name`,
-                unit: sql`excluded.unit`,
-                isActive: sql`excluded.is_active`,
-                updatedAt: new Date(),
-              },
-            });
-        }
-
-        summary.inserted = insertedPlanned;
-        summary.updated = updatedPlanned;
-      }
-
-      // ✅ 1 log resumido (bem mais leve)
-      await tx.insert(schema.auditLogs).values({
-        tableName: "products",
-        action: "IMPORT",
-        recordId: `unit:${unitId}`,
-        userId: Number.isFinite(adminId) ? adminId : null,
-        payload: JSON.stringify({
-          source: "import",
-          unitId,
-          mode,
-          totals: {
-            totalValidRows: cleaned.length,
-            inserted: summary.inserted,
-            updated: summary.updated,
-            skipped: summary.skipped,
-            invalidRows: errors.length,
-          },
-        }),
-      });
+    result = await applyProducts({
+      unitId,
+      mode,
+      rows: cleaned.map((c) => ({
+        sku: c.row.sku,
+        name: c.row.name,
+        unit: c.row.unit ?? "UN",
+        isActive: c.row.isActive ?? true,
+      })),
+      adminId: Number.isFinite(adminId) ? adminId : null,
+      invalidRows: errors.length,
+      audit: { via: "arquivo" },
     });
   } catch (e: any) {
     return NextResponse.json(
@@ -234,6 +161,15 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+
+  const summary = {
+    unitId,
+    mode,
+    inserted: result.inserted,
+    updated: result.updated,
+    skipped: result.skipped,
+    errors,
+  };
 
   return NextResponse.json({
     unitId,
